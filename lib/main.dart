@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -6,6 +7,7 @@ import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Nombre del archivo de audio generado localmente
 const _archivoSonido = 'alarma_limpieza.wav';
@@ -119,10 +121,27 @@ class MiDespertadorApp extends StatelessWidget {
 class _Alarma {
   final int id;
   final DateTime hora;
-  final String etiqueta;
+  String etiqueta;
   bool activa = true;
 
   _Alarma({required this.id, required this.hora, required this.etiqueta});
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'hora': hora.toIso8601String(),
+    'etiqueta': etiqueta,
+    'activa': activa,
+  };
+
+  factory _Alarma.fromJson(Map<String, dynamic> json) {
+    final alarma = _Alarma(
+      id: json['id'] as int,
+      hora: DateTime.parse(json['hora'] as String),
+      etiqueta: json['etiqueta'] as String,
+    );
+    alarma.activa = json['activa'] as bool;
+    return alarma;
+  }
 }
 
 class PantallaAlarmas extends StatefulWidget {
@@ -134,6 +153,7 @@ class PantallaAlarmas extends StatefulWidget {
 
 class _PantallaAlarmasState extends State<PantallaAlarmas> {
   final List<_Alarma> _alarmas = [];
+  int _nextId = 1;
 
   // ignore: deprecated_member_use
   late StreamSubscription<AlarmSettings> _suscripcion;
@@ -143,6 +163,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
     super.initState();
     // ignore: deprecated_member_use
     _suscripcion = Alarm.ringStream.stream.listen(_mostrarDialogoAlarma);
+    _cargarAlarmas();
     if (_necesitaPermisoAlarmasExactas) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _mostrarDialogoPermisoAlarma(),
@@ -154,6 +175,35 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
   void dispose() {
     _suscripcion.cancel();
     super.dispose();
+  }
+
+  Future<void> _guardarAlarmas() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lista = _alarmas.map((a) => jsonEncode(a.toJson())).toList();
+    await prefs.setStringList('alarmas', lista);
+    await prefs.setInt('nextId', _nextId);
+  }
+
+  Future<void> _cargarAlarmas() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lista = prefs.getStringList('alarmas') ?? [];
+    final ahora = DateTime.now();
+    for (final entrada in lista) {
+      final alarma = _Alarma.fromJson(
+        jsonDecode(entrada) as Map<String, dynamic>,
+      );
+      // Reprogramar solo las alarmas activas que aún no han vencido
+      if (alarma.activa && alarma.hora.isAfter(ahora)) {
+        await Alarm.set(alarmSettings: _crearConfiguracion(alarma));
+      }
+      _alarmas.add(alarma);
+    }
+    // Restaurar el contador; si no está guardado, usar max(ids)+1 como fallback
+    _nextId = prefs.getInt('nextId') ??
+        (_alarmas.isEmpty
+            ? 1
+            : _alarmas.map((a) => a.id).reduce(max) + 1);
+    if (mounted) setState(() {});
   }
 
   AlarmSettings _crearConfiguracion(_Alarma alarma) {
@@ -186,6 +236,9 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
     );
     if (horaElegida == null || !mounted) return;
 
+    final etiquetaIngresada = await _pedirEtiqueta('');
+    if (etiquetaIngresada == null || !mounted) return;
+
     final ahora = DateTime.now();
     DateTime fechaAlarma = DateTime(
       ahora.year,
@@ -199,13 +252,14 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
     }
 
     final nuevaAlarma = _Alarma(
-      id: Random().nextInt(2147483646) + 1,
+      id: _nextId++,
       hora: fechaAlarma,
-      etiqueta: 'Alarma',
+      etiqueta: etiquetaIngresada.trim().isEmpty ? 'Alarma' : etiquetaIngresada.trim(),
     );
 
     await Alarm.set(alarmSettings: _crearConfiguracion(nuevaAlarma));
     setState(() => _alarmas.add(nuevaAlarma));
+    await _guardarAlarmas();
   }
 
   Future<void> _toggleAlarma(_Alarma alarma, bool activa) async {
@@ -215,11 +269,59 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
       await Alarm.stop(alarma.id);
     }
     setState(() => alarma.activa = activa);
+    await _guardarAlarmas();
   }
 
   Future<void> _eliminarAlarma(_Alarma alarma) async {
     await Alarm.stop(alarma.id);
     setState(() => _alarmas.remove(alarma));
+    await _guardarAlarmas();
+  }
+
+  /// Muestra un diálogo con un TextField para ingresar o editar una etiqueta.
+  /// Devuelve el texto introducido, o null si el usuario cancela.
+  Future<String?> _pedirEtiqueta(String inicial) async {
+    if (!mounted) return null;
+    final controller = TextEditingController(text: inicial);
+    final resultado = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nombre de la alarma'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Ej: Despertar a María',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    // Diferir el dispose al siguiente frame para que el diálogo termine
+    // de animar su salida antes de que el controlador sea liberado.
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
+    return resultado;
+  }
+
+  Future<void> _editarEtiqueta(_Alarma alarma) async {
+    final nueva = await _pedirEtiqueta(alarma.etiqueta);
+    if (nueva == null || !mounted) return;
+    setState(() => alarma.etiqueta = nueva.trim().isEmpty ? 'Alarma' : nueva.trim());
+    if (alarma.activa) {
+      await Alarm.set(alarmSettings: _crearConfiguracion(alarma));
+    }
+    await _guardarAlarmas();
   }
 
   /// Explica al usuario por qué se necesita el permiso y abre Configuración.
@@ -373,9 +475,23 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
                             ),
                           ],
                         ),
-                        trailing: Switch(
-                          value: alarma.activa,
-                          onChanged: (v) => _toggleAlarma(alarma, v),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                Icons.edit,
+                                color: alarma.activa
+                                    ? Colors.grey[600]
+                                    : Colors.grey,
+                              ),
+                              onPressed: () => _editarEtiqueta(alarma),
+                            ),
+                            Switch(
+                              value: alarma.activa,
+                              onChanged: (v) => _toggleAlarma(alarma, v),
+                            ),
+                          ],
                         ),
                       ),
                     ),

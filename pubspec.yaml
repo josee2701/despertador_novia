@@ -35,6 +35,7 @@ dependencies:
   alarm: ^5.2.1
   path_provider: ^2.1.0
   permission_handler: ^11.0.0
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:
