@@ -5,13 +5,28 @@ import 'dart:typed_data';
 import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 // Nombre del archivo de audio generado localmente
 const _archivoSonido = 'alarma_limpieza.wav';
 
+// Se establece en main() antes de Alarm.init(); el widget lo lee en initState.
+bool _necesitaPermisoAlarmasExactas = false;
+
+/// Comprueba si la app puede programar alarmas exactas en Android 12+.
+/// Si no tiene permiso, marca el flag para que la UI muestre el diálogo.
+Future<void> _verificarPermisoAlarmasExactas() async {
+  if (!Platform.isAndroid) return;
+  final concedido = await Permission.scheduleExactAlarm.isGranted;
+  if (!concedido) {
+    _necesitaPermisoAlarmasExactas = true;
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _prepararSonido();
+  await _verificarPermisoAlarmasExactas();
   await Alarm.init();
   runApp(const MiDespertadorApp());
 }
@@ -128,6 +143,11 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
     super.initState();
     // ignore: deprecated_member_use
     _suscripcion = Alarm.ringStream.stream.listen(_mostrarDialogoAlarma);
+    if (_necesitaPermisoAlarmasExactas) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _mostrarDialogoPermisoAlarma(),
+      );
+    }
   }
 
   @override
@@ -200,6 +220,36 @@ class _PantallaAlarmasState extends State<PantallaAlarmas> {
   Future<void> _eliminarAlarma(_Alarma alarma) async {
     await Alarm.stop(alarma.id);
     setState(() => _alarmas.remove(alarma));
+  }
+
+  /// Explica al usuario por qué se necesita el permiso y abre Configuración.
+  Future<void> _mostrarDialogoPermisoAlarma() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Permiso necesario'),
+        content: const Text(
+          'Para que las alarmas suenen a la hora exacta, esta app necesita el '
+          'permiso "Alarmas y recordatorios".\n\n'
+          'En la siguiente pantalla, activa el permiso y regresa a la app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Ahora no'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await openAppSettings();
+            },
+            child: const Text('Ir a Configuración'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _mostrarDialogoAlarma(AlarmSettings configuracion) {
