@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:alarm/alarm.dart';
+import 'package:alarm/utils/alarm_set.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -12,6 +13,26 @@ import 'package:do_not_disturb/do_not_disturb.dart';
 
 // Nombre del archivo de audio generado localmente
 const _archivoSonido = 'alarma_limpieza.wav';
+
+// 1=Lunes … 7=Domingo, igual que DateTime.weekday
+const _nombresDias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+/// Devuelve la próxima DateTime en que debe dispararse la alarma.
+/// Si [diasSemana] está vacío, es una alarma de una sola vez.
+DateTime _proximaFecha(int hora, int minuto, List<int> diasSemana) {
+  final ahora = DateTime.now();
+  final base = DateTime(ahora.year, ahora.month, ahora.day, hora, minuto);
+  if (diasSemana.isEmpty) {
+    return base.isBefore(ahora) ? base.add(const Duration(days: 1)) : base;
+  }
+  for (var i = 0; i < 7; i++) {
+    final candidato = base.add(Duration(days: i));
+    if (diasSemana.contains(candidato.weekday) && candidato.isAfter(ahora)) {
+      return candidato;
+    }
+  }
+  return base.add(const Duration(days: 7)); // no debería alcanzarse
+}
 
 // Se establece en main() antes de Alarm.init(); el widget lo lee en initState.
 bool _necesitaPermisoAlarmasExactas = false;
@@ -125,8 +146,14 @@ class _Alarma {
   String etiqueta;
   bool activa = true;
   bool pospuesta = false;
+  List<int> diasSemana;
 
-  _Alarma({required this.id, required this.hora, required this.etiqueta});
+  _Alarma({
+    required this.id,
+    required this.hora,
+    required this.etiqueta,
+    List<int>? diasSemana,
+  }) : diasSemana = diasSemana ?? [];
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -134,6 +161,7 @@ class _Alarma {
     'etiqueta': etiqueta,
     'activa': activa,
     'pospuesta': pospuesta,
+    'diasSemana': diasSemana,
   };
 
   factory _Alarma.fromJson(Map<String, dynamic> json) {
@@ -141,6 +169,10 @@ class _Alarma {
       id: json['id'] as int,
       hora: DateTime.parse(json['hora'] as String),
       etiqueta: json['etiqueta'] as String,
+      diasSemana: (json['diasSemana'] as List<dynamic>?)
+              ?.map((e) => e as int)
+              .toList() ??
+          [],
     );
     alarma.activa = json['activa'] as bool;
     alarma.pospuesta = (json['pospuesta'] as bool?) ?? false;
@@ -163,9 +195,8 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   final _dndPlugin = DoNotDisturbPlugin();
   DateTime _ahora = DateTime.now();
   late Timer _timer;
-
-  // ignore: deprecated_member_use
-  late StreamSubscription<AlarmSettings> _suscripcion;
+  late StreamSubscription<AlarmSet> _suscripcion;
+  AlarmSet _prevAlarmSet = AlarmSet.empty();
 
   @override
   void initState() {
@@ -175,8 +206,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       const Duration(seconds: 1),
       (_) => setState(() => _ahora = DateTime.now()),
     );
-    // ignore: deprecated_member_use
-    _suscripcion = Alarm.ringStream.stream.listen(_mostrarDialogoAlarma);
+    _suscripcion = Alarm.ringing.listen(_mostrarDialogoAlarma);
     _cargarAlarmas();
     _verificarModoNoMolestar();
     if (_necesitaPermisoAlarmasExactas) {
@@ -220,21 +250,33 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     final prefs = await SharedPreferences.getInstance();
     final lista = prefs.getStringList('alarmas') ?? [];
     final ahora = DateTime.now();
+    var huboCambios = false;
     for (final entrada in lista) {
       final alarma = _Alarma.fromJson(
         jsonDecode(entrada) as Map<String, dynamic>,
       );
-      // Reprogramar solo las alarmas activas que aún no han vencido
+      // Alarma vencida: calcular la próxima fecha y reprogramar
+      if (alarma.activa && alarma.hora.isBefore(ahora)) {
+        alarma.hora = alarma.diasSemana.isEmpty
+            // Una sola vez: mover al día siguiente a la misma hora
+            ? DateTime(ahora.year, ahora.month, ahora.day,
+                    alarma.hora.hour, alarma.hora.minute)
+                .add(const Duration(days: 1))
+            // Recurrente: próxima ocurrencia según los días configurados
+            : _proximaFecha(
+                alarma.hora.hour, alarma.hora.minute, alarma.diasSemana);
+        huboCambios = true;
+      }
       if (alarma.activa && alarma.hora.isAfter(ahora)) {
         await Alarm.set(alarmSettings: _crearConfiguracion(alarma));
       }
       _alarmas.add(alarma);
     }
-    // Restaurar el contador; si no está guardado, usar max(ids)+1 como fallback
     _nextId = prefs.getInt('nextId') ??
         (_alarmas.isEmpty
             ? 1
             : _alarmas.map((a) => a.id).reduce(max) + 1);
+    if (huboCambios) await _guardarAlarmas();
     if (mounted) setState(() {});
   }
 
@@ -271,22 +313,14 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     final etiquetaIngresada = await _pedirEtiqueta('');
     if (etiquetaIngresada == null || !mounted) return;
 
-    final ahora = DateTime.now();
-    DateTime fechaAlarma = DateTime(
-      ahora.year,
-      ahora.month,
-      ahora.day,
-      horaElegida.hour,
-      horaElegida.minute,
-    );
-    if (fechaAlarma.isBefore(ahora)) {
-      fechaAlarma = fechaAlarma.add(const Duration(days: 1));
-    }
+    final diasElegidos = await _pedirDiasSemana([]);
+    if (diasElegidos == null || !mounted) return;
 
     final nuevaAlarma = _Alarma(
       id: _nextId++,
-      hora: fechaAlarma,
+      hora: _proximaFecha(horaElegida.hour, horaElegida.minute, diasElegidos),
       etiqueta: etiquetaIngresada.trim().isEmpty ? 'Alarma' : etiquetaIngresada.trim(),
+      diasSemana: diasElegidos,
     );
 
     await Alarm.set(alarmSettings: _crearConfiguracion(nuevaAlarma));
@@ -346,6 +380,87 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     return resultado;
   }
 
+  /// Muestra un diálogo para elegir los días de repetición.
+  /// Devuelve la lista ordenada (puede estar vacía = una sola vez), o null si cancela.
+  Future<List<int>?> _pedirDiasSemana(List<int> inicial) async {
+    if (!mounted) return null;
+    var seleccionados = List<int>.from(inicial);
+    return showDialog<List<int>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Repetir alarma'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Acceso rápido',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                children: [
+                  ActionChip(
+                    label: const Text('Lun–Vie'),
+                    onPressed: () =>
+                        setLocal(() => seleccionados = [1, 2, 3, 4, 5]),
+                  ),
+                  ActionChip(
+                    label: const Text('Todos los días'),
+                    onPressed: () =>
+                        setLocal(() => seleccionados = [1, 2, 3, 4, 5, 6, 7]),
+                  ),
+                  ActionChip(
+                    label: const Text('Solo fin de semana'),
+                    onPressed: () =>
+                        setLocal(() => seleccionados = [6, 7]),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: List.generate(7, (i) {
+                  final dia = i + 1;
+                  return FilterChip(
+                    label: Text(_nombresDias[i]),
+                    selected: seleccionados.contains(dia),
+                    onSelected: (v) => setLocal(() {
+                      if (v) {
+                        seleccionados.add(dia);
+                        seleccionados.sort();
+                      } else {
+                        seleccionados.remove(dia);
+                      }
+                    }),
+                  );
+                }),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Sin días seleccionados = alarma de una sola vez',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, seleccionados),
+              child: const Text('Listo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _editarEtiqueta(_Alarma alarma) async {
     final nueva = await _pedirEtiqueta(alarma.etiqueta);
     if (nueva == null || !mounted) return;
@@ -354,6 +469,36 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       await Alarm.set(alarmSettings: _crearConfiguracion(alarma));
     }
     await _guardarAlarmas();
+  }
+
+  Future<void> _editarHora(_Alarma alarma) async {
+    final nueva = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: alarma.hora.hour, minute: alarma.hora.minute),
+    );
+    if (nueva == null || !mounted) return;
+
+    final ahora = DateTime.now();
+    DateTime fechaNueva = DateTime(
+      ahora.year, ahora.month, ahora.day, nueva.hour, nueva.minute,
+    );
+    if (fechaNueva.isBefore(ahora)) {
+      fechaNueva = fechaNueva.add(const Duration(days: 1));
+    }
+
+    setState(() => alarma.hora = fechaNueva);
+    if (alarma.activa) {
+      await Alarm.set(alarmSettings: _crearConfiguracion(alarma));
+    }
+    await _guardarAlarmas();
+
+    if (mounted) {
+      final horaStr =
+          '${fechaNueva.hour.toString().padLeft(2, '0')}:${fechaNueva.minute.toString().padLeft(2, '0')}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Alarma actualizada para las $horaStr')),
+      );
+    }
   }
 
   /// Explica al usuario por qué se necesita el permiso y abre Configuración.
@@ -386,46 +531,63 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     );
   }
 
-  void _mostrarDialogoAlarma(AlarmSettings configuracion) {
+  void _mostrarDialogoAlarma(AlarmSet conjunto) {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('¡Alarma!'),
-        content: Text(configuracion.notificationSettings.body),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              await Alarm.stop(configuracion.id);
-              final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
-              if (alarma != null) {
-                setState(() {
-                  alarma.hora = DateTime.now().add(const Duration(minutes: 5));
-                  alarma.pospuesta = true;
-                });
-                await Alarm.set(alarmSettings: _crearConfiguracion(alarma));
-                await _guardarAlarmas();
-              }
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Posponer 5 min'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              await Alarm.stop(configuracion.id);
-              final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
-              if (alarma != null) {
-                setState(() => alarma.pospuesta = false);
-                await _guardarAlarmas();
-              }
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Detener'),
-          ),
-        ],
-      ),
-    );
+    for (final configuracion in conjunto.alarms) {
+      // Solo abrir diálogo para alarmas que acaban de añadirse al set
+      if (_prevAlarmSet.containsId(configuracion.id)) continue;
+
+      final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
+      if (alarma != null) {
+        setState(() => alarma.pospuesta = false);
+      }
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('¡Alarma!'),
+          content: Text(configuracion.notificationSettings.body),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Alarm.stop(configuracion.id);
+                final a = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
+                if (a != null) {
+                  setState(() {
+                    a.hora = DateTime.now().add(const Duration(minutes: 5));
+                    a.pospuesta = true;
+                  });
+                  await Alarm.set(alarmSettings: _crearConfiguracion(a));
+                  await _guardarAlarmas();
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Posponer 5 min'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Alarm.stop(configuracion.id);
+                final a = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
+                if (a != null) {
+                  a.pospuesta = false;
+                  if (a.diasSemana.isNotEmpty) {
+                    a.hora = _proximaFecha(
+                        a.hora.hour, a.hora.minute, a.diasSemana);
+                    await Alarm.set(alarmSettings: _crearConfiguracion(a));
+                  }
+                  setState(() {});
+                  await _guardarAlarmas();
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Detener'),
+            ),
+          ],
+        ),
+      );
+    }
+    _prevAlarmSet = conjunto;
   }
 
   String _formatearHora(DateTime dt) {
@@ -625,19 +787,69 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
+                            if (alarma.diasSemana.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Row(
+                                  children: List.generate(7, (i) {
+                                    final activo = alarma.diasSemana.contains(i + 1);
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 5),
+                                      child: Text(
+                                        _nombresDias[i],
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: activo
+                                              ? FontWeight.w700
+                                              : FontWeight.normal,
+                                          color: activo
+                                              ? (alarma.activa
+                                                  ? Theme.of(context).colorScheme.primary
+                                                  : Colors.grey)
+                                              : Colors.grey[300],
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              ),
                           ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
+                            PopupMenuButton<String>(
                               icon: Icon(
-                                Icons.edit,
+                                Icons.more_vert,
                                 color: alarma.activa
-                                    ? Colors.grey[600]
+                                    ? Theme.of(context).colorScheme.onSurface
                                     : Colors.grey,
                               ),
-                              onPressed: () => _editarEtiqueta(alarma),
+                              onSelected: (opcion) {
+                                if (opcion == 'nombre') {
+                                  _editarEtiqueta(alarma);
+                                } else if (opcion == 'hora') {
+                                  _editarHora(alarma);
+                                }
+                              },
+                              itemBuilder: (_) => [
+                                const PopupMenuItem(
+                                  value: 'nombre',
+                                  child: ListTile(
+                                    leading: Icon(Icons.edit),
+                                    title: Text('Editar nombre'),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'hora',
+                                  child: ListTile(
+                                    leading: Icon(Icons.access_time),
+                                    title: Text('Editar hora'),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                              ],
                             ),
                             Switch(
                               value: alarma.activa,
