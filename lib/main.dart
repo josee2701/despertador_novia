@@ -132,7 +132,7 @@ class MiDespertadorApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color.fromARGB(255, 68, 1, 255),
+          seedColor: const Color(0xFF1565C0),
         ),
       ),
       home: const PantallaAlarmas(),
@@ -545,46 +545,81 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: const Text('¡Alarma!'),
-          content: Text(configuracion.notificationSettings.body),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Alarm.stop(configuracion.id);
-                final a = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
-                if (a != null) {
-                  setState(() {
-                    a.hora = DateTime.now().add(const Duration(minutes: 5));
-                    a.pospuesta = true;
-                  });
-                  await Alarm.set(alarmSettings: _crearConfiguracion(a));
-                  await _guardarAlarmas();
+        builder: (ctx) {
+          var segundos = 5;
+          Timer? contador;
+
+          return StatefulBuilder(
+            builder: (dialogCtx, setLocal) {
+              // Iniciar el temporizador una sola vez
+              contador ??= Timer.periodic(const Duration(seconds: 1), (t) {
+                if (segundos <= 1) {
+                  t.cancel();
+                  setLocal(() => segundos = 0);
+                } else {
+                  setLocal(() => segundos--);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('Posponer 5 min'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                await Alarm.stop(configuracion.id);
-                final a = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
-                if (a != null) {
-                  a.pospuesta = false;
-                  if (a.diasSemana.isNotEmpty) {
-                    a.hora = _proximaFecha(
-                        a.hora.hour, a.hora.minute, a.diasSemana);
-                    await Alarm.set(alarmSettings: _crearConfiguracion(a));
-                  }
-                  setState(() {});
-                  await _guardarAlarmas();
-                }
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('Detener'),
-            ),
-          ],
-        ),
+              });
+
+              final bloqueado = segundos > 0;
+
+              return AlertDialog(
+                title: const Text('¡Alarma!'),
+                content: Text(configuracion.notificationSettings.body),
+                actions: [
+                  TextButton(
+                    onPressed: bloqueado
+                        ? null
+                        : () async {
+                            contador?.cancel();
+                            await Alarm.stop(configuracion.id);
+                            final a = _alarmas
+                                .where((a) => a.id == configuracion.id)
+                                .firstOrNull;
+                            if (a != null) {
+                              setState(() {
+                                a.hora = DateTime.now()
+                                    .add(const Duration(minutes: 5));
+                                a.pospuesta = true;
+                              });
+                              await Alarm.set(
+                                  alarmSettings: _crearConfiguracion(a));
+                              await _guardarAlarmas();
+                            }
+                            if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                          },
+                    child: Text(
+                        bloqueado ? 'Posponer ($segundos)' : 'Posponer 5 min'),
+                  ),
+                  FilledButton(
+                    onPressed: bloqueado
+                        ? null
+                        : () async {
+                            contador?.cancel();
+                            await Alarm.stop(configuracion.id);
+                            final a = _alarmas
+                                .where((a) => a.id == configuracion.id)
+                                .firstOrNull;
+                            if (a != null) {
+                              a.pospuesta = false;
+                              if (a.diasSemana.isNotEmpty) {
+                                a.hora = _proximaFecha(
+                                    a.hora.hour, a.hora.minute, a.diasSemana);
+                                await Alarm.set(
+                                    alarmSettings: _crearConfiguracion(a));
+                              }
+                              setState(() {});
+                              await _guardarAlarmas();
+                            }
+                            if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                          },
+                    child: Text(bloqueado ? 'Detener ($segundos)' : 'Detener'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
       );
     }
     _prevAlarmSet = conjunto;
@@ -636,31 +671,62 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
           Container(
             width: double.infinity,
             margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            padding: const EdgeInsets.symmetric(vertical: 20),
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary,
-              borderRadius: BorderRadius.circular(20),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0D47A1),
+                  Color(0xFF1976D2),
+                  Color(0xFF42A5F5),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF1565C0).withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
             child: Column(
               children: [
-                Text(
-                  _horaActualHHMMSS(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 52,
-                    fontWeight: FontWeight.w200,
-                    letterSpacing: 4,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.access_time,
+                        color: Colors.white.withValues(alpha: 0.7), size: 28),
+                    const SizedBox(width: 8),
+                    Text(
+                      _horaActualHHMMSS(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 56,
+                        fontWeight: FontWeight.w200,
+                        letterSpacing: 4,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  _textoProximaAlarma(),
-                  style: TextStyle(
-                    color: Colors.white.withAlpha(210),
-                    fontSize: 13,
-                  ),
-                  textAlign: TextAlign.center,
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.alarm,
+                        color: Colors.white.withValues(alpha: 0.6), size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      _textoProximaAlarma(),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -670,34 +736,60 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFF9C4),
+                color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFF9A825)),
+                border: Border.all(
+                    color: Theme.of(context).colorScheme.errorContainer),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   Icon(Icons.warning_amber_rounded,
-                      color: Color(0xFFF57F17), size: 22),
-                  SizedBox(width: 10),
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                      size: 22),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Modo No Molestar activo — Tu alarma podría no sonar',
                       style: TextStyle(
-                        color: Color(0xFF5D4037),
+                        color: Theme.of(context).colorScheme.onErrorContainer,
                         fontSize: 13,
                       ),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () async {
+                      if (Platform.isAndroid) await openAppSettings();
+                    },
+                    child: const Text('Abrir config.'),
                   ),
                 ],
               ),
             ),
           Expanded(
             child: _alarmas.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No hay alarmas\nPresiona + para agregar una',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.alarm_add_outlined,
+                            size: 100, color: Colors.grey[300]),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No tienes alarmas',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Toca + para crear tu primera alarma',
+                          style: TextStyle(
+                              fontSize: 14, color: Colors.grey[400]),
+                        ),
+                      ],
                     ),
                   )
                 : ListView.builder(
@@ -719,15 +811,39 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     child: const Icon(Icons.delete, color: Colors.white),
                   ),
                   child: Card(
-                    elevation: 0,
+                    elevation: 2,
+                    surfaceTintColor:
+                        Theme.of(context).colorScheme.surfaceTint,
                     color: alarma.activa ? Colors.white : Colors.grey[200],
                     margin: const EdgeInsets.only(bottom: 12.0),
+                    shadowColor: Theme.of(context)
+                        .colorScheme
+                        .shadow
+                        .withValues(alpha: 0.1),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12.0, horizontal: 8.0),
                       child: ListTile(
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer
+                                .withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.alarm,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onPrimaryContainer,
+                            size: 24,
+                          ),
+                        ),
                         title: Row(
                           crossAxisAlignment: CrossAxisAlignment.baseline,
                           textBaseline: TextBaseline.alphabetic,
@@ -735,10 +851,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                             Text(
                               _formatearHora(alarma.hora),
                               style: TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.w300,
+                                fontSize: 32,
+                                fontWeight: FontWeight.w600,
                                 color: alarma.activa
-                                    ? Colors.black
+                                    ? Colors.black87
                                     : Colors.grey,
                               ),
                             ),
@@ -747,9 +863,9 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                               _periodo(alarma.hora),
                               style: TextStyle(
                                 fontSize: 14,
-                                fontWeight: FontWeight.bold,
+                                fontWeight: FontWeight.w600,
                                 color: alarma.activa
-                                    ? Colors.black
+                                    ? Theme.of(context).colorScheme.primary
                                     : Colors.grey,
                               ),
                             ),
@@ -761,8 +877,8 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                             Row(
                               children: [
                                 Icon(
-                                  Icons.notifications,
-                                  size: 16,
+                                  Icons.notifications_none_rounded,
+                                  size: 14,
                                   color: alarma.activa
                                       ? Colors.grey[600]
                                       : Colors.grey,
@@ -772,8 +888,9 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                                   alarma.etiqueta,
                                   style: TextStyle(
                                     color: alarma.activa
-                                        ? Colors.grey[600]
+                                        ? Colors.grey[700]
                                         : Colors.grey,
+                                    fontSize: 13,
                                   ),
                                 ),
                               ],
@@ -792,9 +909,11 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                                 padding: const EdgeInsets.only(top: 3),
                                 child: Row(
                                   children: List.generate(7, (i) {
-                                    final activo = alarma.diasSemana.contains(i + 1);
+                                    final activo =
+                                        alarma.diasSemana.contains(i + 1);
                                     return Padding(
-                                      padding: const EdgeInsets.only(right: 5),
+                                      padding:
+                                          const EdgeInsets.only(right: 5),
                                       child: Text(
                                         _nombresDias[i],
                                         style: TextStyle(
@@ -804,7 +923,9 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                                               : FontWeight.normal,
                                           color: activo
                                               ? (alarma.activa
-                                                  ? Theme.of(context).colorScheme.primary
+                                                  ? Theme.of(context)
+                                                      .colorScheme
+                                                      .primary
                                                   : Colors.grey)
                                               : Colors.grey[300],
                                         ),
@@ -822,38 +943,40 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                               icon: Icon(
                                 Icons.more_vert,
                                 color: alarma.activa
-                                    ? Theme.of(context).colorScheme.onSurface
+                                    ? Colors.grey[600]
                                     : Colors.grey,
                               ),
-                              onSelected: (opcion) {
-                                if (opcion == 'nombre') {
+                              onSelected: (value) {
+                                if (value == 'editar_nombre') {
                                   _editarEtiqueta(alarma);
-                                } else if (opcion == 'hora') {
+                                } else if (value == 'editar_hora') {
                                   _editarHora(alarma);
                                 }
                               },
-                              itemBuilder: (_) => [
-                                const PopupMenuItem(
-                                  value: 'nombre',
-                                  child: ListTile(
-                                    leading: Icon(Icons.edit),
-                                    title: Text('Editar nombre'),
-                                    contentPadding: EdgeInsets.zero,
-                                  ),
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'editar_nombre',
+                                  child: Row(children: [
+                                    Icon(Icons.edit, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Editar nombre'),
+                                  ]),
                                 ),
-                                const PopupMenuItem(
-                                  value: 'hora',
-                                  child: ListTile(
-                                    leading: Icon(Icons.access_time),
-                                    title: Text('Editar hora'),
-                                    contentPadding: EdgeInsets.zero,
-                                  ),
+                                PopupMenuItem(
+                                  value: 'editar_hora',
+                                  child: Row(children: [
+                                    Icon(Icons.access_time, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Editar hora'),
+                                  ]),
                                 ),
                               ],
                             ),
                             Switch(
                               value: alarma.activa,
                               onChanged: (v) => _toggleAlarma(alarma, v),
+                              activeThumbColor:
+                                  Theme.of(context).colorScheme.primary,
                             ),
                           ],
                         ),
