@@ -17,8 +17,14 @@ class AlarmService {
   }
 
   /// Crea la configuración nativa a partir de un modelo [Alarma].
+  ///
+  /// El [stopButton] llama a [Alarm.stop] internamente (no pasa por nuestro
+  /// presenter). Por eso [onAppResumed] verifica con [alarmIsRinging] si la
+  /// alarma sigue sonando al volver a foreground y reprograma si es recurrente.
   AlarmSettings crearConfiguracion(Alarma alarma) {
-    final horaTexto = formatearHoraAMPM(alarma.hora);
+    final horaTexto = formatearHoraAMPM(
+      DateTime(2000, 1, 1, alarma.horaDelDia, alarma.minutoDelDia),
+    );
     return AlarmSettings(
       id: alarma.id,
       dateTime: alarma.hora,
@@ -50,6 +56,9 @@ class AlarmService {
   Future<void> detener(int id) async {
     await Alarm.stop(id);
   }
+
+  /// Devuelve true si la alarma con ese ID está sonando en este momento.
+  Future<bool> alarmIsRinging(int id) => Alarm.isRinging(id);
 
   /// Escucha el stream de alarmas que están sonando actualmente.
   Stream<AlarmSet> get ringingStream => Alarm.ringing;

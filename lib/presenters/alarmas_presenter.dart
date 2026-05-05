@@ -72,6 +72,9 @@ class AlarmasPresenter {
   /// Indica si el modo No Molestar está activo.
   bool get modoNoMolestar => _modoNoMolestar;
 
+  /// True si hay una alarma sonando activamente.
+  bool get hayAlarmaSonando => _alarmaSonando != null;
+
   /// Inicializa el presenter: carga alarmas, inicia timers y verifica permisos.
   Future<void> iniciar() async {
     await _alarmService.init();
@@ -103,6 +106,15 @@ class AlarmasPresenter {
 
   /// Maneja el evento cuando una alarma comienza a sonar.
   void _onAlarmaSonando(AlarmSet conjunto) {
+    // Detectar si la alarma activa desapareció del stream (detenida externamente,
+    // por ejemplo deslizando la notificación o por intervención del OS).
+    if (_alarmaSonando != null &&
+        _prevAlarmSet.containsId(_alarmaSonando!.id) &&
+        !conjunto.containsId(_alarmaSonando!.id)) {
+      _limpiarAlarmaSonandoExterna(_alarmaSonando!);
+    }
+
+    // Procesar alarmas que empezaron a sonar desde el último evento.
     for (final configuracion in conjunto.alarms) {
       if (_prevAlarmSet.containsId(configuracion.id)) continue;
 
@@ -110,18 +122,36 @@ class AlarmasPresenter {
           ?? _alarmaDesdeConfig(configuracion);
 
       _alarmaSonando = alarma;
-      _alertaEnPantalla = true;
       alarma.pospuesta = false;
       _guardarAlarmas();
 
       final lifecycle = WidgetsBinding.instance.lifecycleState;
       if (lifecycle == AppLifecycleState.resumed) {
+        // App en primer plano: mostrar banner inmediatamente.
+        _alertaEnPantalla = true;
         _view.onAlarmaSonandoEnForeground(alarma);
-      } else {
-        _view.onMostrarPantallaAlarma(alarma);
       }
+      // App en segundo plano: NO hacer push de ruta ahora.
+      // onAppResumed verificará con alarmIsRinging si sigue sonando antes de mostrarla,
+      // evitando que una ruta quede apilada si el usuario ya detuvo desde la notificación.
     }
     _prevAlarmSet = conjunto;
+  }
+
+  /// Limpia el estado cuando la alarma se detuvo fuera del control de la app
+  /// (OS, notificación del sistema, etc.) y reprograma si es recurrente.
+  void _limpiarAlarmaSonandoExterna(Alarma alarma) {
+    alarma.pospuesta = false;
+    _alarmaSonando = null;
+    _alertaEnPantalla = false;
+
+    if (alarma.diasSemana.isNotEmpty) {
+      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+      _alarmService.programar(alarma); // fire-and-forget, sin bloquear el stream
+    }
+
+    _guardarAlarmas();
+    _view.onAlarmaActualizada();
   }
 
   /// Crea una Alarma temporal desde AlarmSettings (caso edge).
@@ -158,8 +188,32 @@ class AlarmasPresenter {
   /// Maneja el evento de ciclo de vida cuando la app vuelve a primer plano.
   Future<void> onAppResumed() async {
     await _verificarModoNoMolestar();
-    // Solo muestra la pantalla si aún no hay una ruta de alarma apilada.
-    if (_alarmaSonando != null && !_alertaEnPantalla) {
+
+    if (_alarmaSonando == null) return;
+
+    // Verificar si la alarma sigue sonando: pudo detenerse desde la notificación
+    // del sistema mientras la app estaba en background.
+    final sigueSonando = await _alarmService.alarmIsRinging(_alarmaSonando!.id);
+
+    if (!sigueSonando) {
+      // Detenida externamente — limpiar estado y reprogramar si es recurrente.
+      final alarma = _alarmaSonando!;
+      _alarmaSonando = null;
+      _alertaEnPantalla = false;
+      alarma.pospuesta = false;
+
+      if (alarma.diasSemana.isNotEmpty) {
+        alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+        await _alarmService.programar(alarma);
+      }
+
+      await _guardarAlarmas();
+      _view.onAlarmaActualizada();
+      return;
+    }
+
+    // Sigue sonando — mostrar pantalla solo si no hay una ruta ya apilada.
+    if (!_alertaEnPantalla) {
       _alertaEnPantalla = true;
       _view.onMostrarPantallaAlarma(_alarmaSonando!);
     }

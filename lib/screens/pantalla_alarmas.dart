@@ -73,7 +73,14 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   void onAlarmaActualizada() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        // Si la alarma ya no está sonando (detenida externamente), cerrar el banner.
+        if (!_presenter.hayAlarmaSonando) {
+          _alarmaRinging = null;
+        }
+      });
+    }
   }
 
   @override
