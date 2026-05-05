@@ -262,7 +262,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
                 const SizedBox(height: 24),
 
-                if (_mostrarBotones)
+                if (_mostrarBotones && !_desbloqueado)
                   FadeIn(
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,

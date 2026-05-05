@@ -3,6 +3,7 @@ import 'package:alarm/utils/alarm_set.dart';
 
 import '../models/alarma.dart';
 import '../utils/constantes.dart';
+import '../utils/date_utils.dart';
 
 /// Servicio que interactúa con el package `alarm` para programar y detener
 /// alarmas nativas en el dispositivo.
@@ -17,6 +18,7 @@ class AlarmService {
 
   /// Crea la configuración nativa a partir de un modelo [Alarma].
   AlarmSettings crearConfiguracion(Alarma alarma) {
+    final horaTexto = formatearHoraAMPM(alarma.hora);
     return AlarmSettings(
       id: alarma.id,
       dateTime: alarma.hora,
@@ -27,8 +29,8 @@ class AlarmService {
       ),
       notificationSettings: NotificationSettings(
         title: 'Mi Despertador',
-        body: alarma.etiqueta,
-        stopButton: 'Detener alarma',
+        body: '${alarma.etiqueta} — $horaTexto',
+        stopButton: 'Detener',
       ),
       loopAudio: true,
       vibrate: true,

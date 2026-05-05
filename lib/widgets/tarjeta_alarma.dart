@@ -25,8 +25,10 @@ class TarjetaAlarma extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final esHoy = _esParaHoy();
-    final icono = iconoSegunHora(alarma.hora.hour);
-    final horaAMPM = formatearHoraAMPM(alarma.hora);
+    final icono = iconoSegunHora(alarma.horaDelDia);
+    final horaAMPM = formatearHoraAMPM(
+      DateTime(2000, 1, 1, alarma.horaDelDia, alarma.minutoDelDia),
+    );
 
     return Dismissible(
       key: ValueKey(alarma.id),

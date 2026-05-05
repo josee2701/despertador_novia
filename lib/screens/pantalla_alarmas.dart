@@ -28,6 +28,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   late final AlarmasPresenter _presenter;
   bool _modoNoMolestar = false;
   bool _animarFAB = false;
+  Alarma? _alarmaRinging;
 
   @override
   void initState() {
@@ -36,7 +37,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     _presenter = AlarmasPresenter(view: this);
     _presenter.iniciar();
 
-    // Activar animación del FAB si no hay alarmas
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final alarmas = _presenter.alarmas;
       if (alarmas.isEmpty && mounted) {
@@ -114,6 +114,12 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   }
 
   @override
+  void onAlarmaSonandoEnForeground(Alarma alarma) {
+    if (!mounted) return;
+    setState(() => _alarmaRinging = alarma);
+  }
+
+  @override
   BuildContext getContext() => context;
 
   // ─── Acciones del usuario ───────────────────────────────────────
@@ -148,7 +154,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         alarma: alarma,
         onGuardar: (hora, minuto, etiqueta, dias) async {
           Navigator.pop(ctx);
-          _presenter.actualizarAlarmaCompleta(
+          await _presenter.actualizarAlarmaCompleta(
             alarma: alarma,
             nuevaHora: hora,
             nuevoMinuto: minuto,
@@ -240,6 +246,27 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       ),
       body: Column(
         children: [
+          // ── Banner: alarma sonando (foreground) ──
+          if (_alarmaRinging != null)
+            _BannerAlarmaSonando(
+              alarma: _alarmaRinging!,
+              onVer: () {
+                final alarma = _alarmaRinging!;
+                setState(() => _alarmaRinging = null);
+                onMostrarPantallaAlarma(alarma);
+              },
+              onDetener: () {
+                final alarma = _alarmaRinging!;
+                setState(() => _alarmaRinging = null);
+                _presenter.detenerAlarma(alarma);
+              },
+              onPosponer: () {
+                final alarma = _alarmaRinging!;
+                setState(() => _alarmaRinging = null);
+                _presenter.posponerAlarma(alarma);
+              },
+            ),
+
           // ── Header: próxima alarma ──
           Container(
             width: double.infinity,
@@ -362,7 +389,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Animación sutil del ícono
                         TweenAnimationBuilder<double>(
                           tween: Tween(begin: 0.95, end: 1.0),
                           duration: const Duration(milliseconds: 1500),
@@ -488,6 +514,147 @@ class _FABAnimadoState extends State<_FABAnimado>
         icon: const Icon(Icons.add),
         label: const Text('Nueva alarma'),
         elevation: 6,
+      ),
+    );
+  }
+}
+
+/// Banner que aparece cuando la alarma suena mientras la app está en primer plano.
+///
+/// Muestra un aviso sutil en la parte superior con opciones para ver,
+/// detener o posponer la alarma. No bloquea la pantalla actual.
+class _BannerAlarmaSonando extends StatefulWidget {
+  final Alarma alarma;
+  final VoidCallback onVer;
+  final VoidCallback onDetener;
+  final VoidCallback onPosponer;
+
+  const _BannerAlarmaSonando({
+    required this.alarma,
+    required this.onVer,
+    required this.onDetener,
+    required this.onPosponer,
+  });
+
+  @override
+  State<_BannerAlarmaSonando> createState() => _BannerAlarmaSonandoState();
+}
+
+class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    );
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _animation,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.alarm,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${widget.alarma.etiqueta} está sonando',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: widget.onVer,
+                  icon: const Icon(Icons.open_in_full, size: 18),
+                  label: const Text('Ver'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onPosponer,
+                    icon: const Icon(Icons.snooze, size: 16),
+                    label: const Text('5 min'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: widget.onDetener,
+                    icon: const Icon(Icons.stop, size: 16),
+                    label: const Text('Detener'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

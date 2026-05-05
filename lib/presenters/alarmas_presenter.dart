@@ -22,6 +22,7 @@ abstract class AlarmasView {
   void onPermisoNecesario(bool necesita);
   void onModoNoMolestarCambiado(bool activo);
   void onMostrarPantallaAlarma(Alarma alarma);
+  void onAlarmaSonandoEnForeground(Alarma alarma);
   BuildContext getContext();
 }
 
@@ -48,6 +49,9 @@ class AlarmasPresenter {
   Timer? _timer;
   StreamSubscription? _suscripcionRinging;
   AlarmSet _prevAlarmSet = AlarmSet.empty();
+  Alarma? _alarmaSonando;
+  // Previene que onAppResumed apile múltiples rutas mientras la alarma sigue sonando.
+  bool _alertaEnPantalla = false;
 
   AlarmasPresenter({
     required AlarmasView view,
@@ -102,13 +106,20 @@ class AlarmasPresenter {
     for (final configuracion in conjunto.alarms) {
       if (_prevAlarmSet.containsId(configuracion.id)) continue;
 
-      final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull;
-      if (alarma != null) {
-        alarma.pospuesta = false;
-        _guardarAlarmas();
-      }
+      final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull
+          ?? _alarmaDesdeConfig(configuracion);
 
-      _view.onMostrarPantallaAlarma(alarma ?? _alarmaDesdeConfig(configuracion));
+      _alarmaSonando = alarma;
+      _alertaEnPantalla = true;
+      alarma.pospuesta = false;
+      _guardarAlarmas();
+
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle == AppLifecycleState.resumed) {
+        _view.onAlarmaSonandoEnForeground(alarma);
+      } else {
+        _view.onMostrarPantallaAlarma(alarma);
+      }
     }
     _prevAlarmSet = conjunto;
   }
@@ -147,11 +158,17 @@ class AlarmasPresenter {
   /// Maneja el evento de ciclo de vida cuando la app vuelve a primer plano.
   Future<void> onAppResumed() async {
     await _verificarModoNoMolestar();
+    // Solo muestra la pantalla si aún no hay una ruta de alarma apilada.
+    if (_alarmaSonando != null && !_alertaEnPantalla) {
+      _alertaEnPantalla = true;
+      _view.onMostrarPantallaAlarma(_alarmaSonando!);
+    }
   }
 
   /// Carga las alarmas desde almacenamiento persistente.
   ///
-  /// Si encuentra alarmas vencidas, recalcula su próxima fecha de disparo.
+  /// Si encuentra alarmas vencidas (incluyendo snoozes expirados), recalcula
+  /// su próxima fecha de disparo usando horaDelDia/minutoDelDia.
   Future<void> _cargarAlarmas() async {
     final resultado = await _storageService.cargarAlarmas();
     _alarmas = resultado.alarmas;
@@ -162,19 +179,8 @@ class AlarmasPresenter {
 
     for (final alarma in _alarmas) {
       if (alarma.activa && alarma.hora.isBefore(ahora)) {
-        alarma.hora = alarma.diasSemana.isEmpty
-            ? DateTime(
-                ahora.year,
-                ahora.month,
-                ahora.day,
-                alarma.hora.hour,
-                alarma.hora.minute,
-              ).add(const Duration(days: 1))
-            : proximaFecha(
-                alarma.hora.hour,
-                alarma.hora.minute,
-                alarma.diasSemana,
-              );
+        alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+        alarma.pospuesta = false;
         huboCambios = true;
       }
 
@@ -244,19 +250,11 @@ class AlarmasPresenter {
 
   /// Actualiza la hora de una alarma y la reprograma.
   Future<void> actualizarHora(Alarma alarma, int nuevaHora, int nuevoMinuto) async {
-    final ahora = DateTime.now();
-    DateTime fechaNueva = DateTime(
-      ahora.year,
-      ahora.month,
-      ahora.day,
-      nuevaHora,
-      nuevoMinuto,
-    );
-    if (fechaNueva.isBefore(ahora)) {
-      fechaNueva = fechaNueva.add(const Duration(days: 1));
-    }
-
-    alarma.hora = fechaNueva;
+    alarma.horaDelDia = nuevaHora;
+    alarma.minutoDelDia = nuevoMinuto;
+    // proximaFecha respeta los días de repetición, evitando que la alarma
+    // caiga en un día no seleccionado.
+    alarma.hora = proximaFecha(nuevaHora, nuevoMinuto, alarma.diasSemana);
     if (alarma.activa) {
       await _alarmService.programar(alarma);
     }
@@ -278,8 +276,8 @@ class AlarmasPresenter {
   Future<void> actualizarDiasSemana(Alarma alarma, List<int> nuevosDias) async {
     alarma.diasSemana = nuevosDias;
 
-    if (nuevosDias.isNotEmpty && alarma.activa) {
-      alarma.hora = proximaFecha(alarma.hora.hour, alarma.hora.minute, nuevosDias);
+    if (alarma.activa) {
+      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, nuevosDias);
       await _alarmService.programar(alarma);
     }
 
@@ -295,20 +293,9 @@ class AlarmasPresenter {
     String? nuevaEtiqueta,
     List<int>? nuevosDias,
   }) async {
-    final ahora = DateTime.now();
-
     if (nuevaHora != null && nuevoMinuto != null) {
-      DateTime fechaNueva = DateTime(
-        ahora.year,
-        ahora.month,
-        ahora.day,
-        nuevaHora,
-        nuevoMinuto,
-      );
-      if (fechaNueva.isBefore(ahora)) {
-        fechaNueva = fechaNueva.add(const Duration(days: 1));
-      }
-      alarma.hora = fechaNueva;
+      alarma.horaDelDia = nuevaHora;
+      alarma.minutoDelDia = nuevoMinuto;
     }
 
     if (nuevaEtiqueta != null) {
@@ -317,10 +304,11 @@ class AlarmasPresenter {
 
     if (nuevosDias != null) {
       alarma.diasSemana = nuevosDias;
+    }
 
-      if (nuevosDias.isNotEmpty && alarma.activa) {
-        alarma.hora = proximaFecha(alarma.hora.hour, alarma.hora.minute, nuevosDias);
-      }
+    // Recalcular próximo disparo si cambió la hora o los días.
+    if ((nuevaHora != null && nuevoMinuto != null) || nuevosDias != null) {
+      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
     }
 
     if (alarma.activa) {
@@ -353,10 +341,13 @@ class AlarmasPresenter {
 
   /// Posponer una alarma activa por 5 minutos.
   Future<void> posponerAlarma(Alarma alarma) async {
+    // alarma.hora se usa para programar el snooze; horaDelDia/minutoDelDia no cambian.
     alarma.hora = DateTime.now().add(const Duration(minutes: 5));
     alarma.pospuesta = true;
     await _alarmService.programar(alarma);
     await _guardarAlarmas();
+    _alarmaSonando = null;
+    _alertaEnPantalla = false;
     _view.onAlarmaActualizada();
   }
 
@@ -366,15 +357,14 @@ class AlarmasPresenter {
     alarma.pospuesta = false;
 
     if (alarma.diasSemana.isNotEmpty) {
-      alarma.hora = proximaFecha(
-        alarma.hora.hour,
-        alarma.hora.minute,
-        alarma.diasSemana,
-      );
+      // Usar horaDelDia/minutoDelDia: alarma.hora puede contener la hora del snooze.
+      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       await _alarmService.programar(alarma);
     }
 
     await _guardarAlarmas();
+    _alarmaSonando = null;
+    _alertaEnPantalla = false;
     _view.onAlarmaActualizada();
   }
 

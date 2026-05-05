@@ -50,8 +50,8 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
     super.initState();
     if (_esEdicion) {
       _horaSeleccionada = TimeOfDay(
-        hour: widget.alarma!.hora.hour,
-        minute: widget.alarma!.hora.minute,
+        hour: widget.alarma!.horaDelDia,
+        minute: widget.alarma!.minutoDelDia,
       );
       _etiqueta = widget.alarma!.etiqueta;
       _diasSeleccionados = List<int>.from(widget.alarma!.diasSemana);

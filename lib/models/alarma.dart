@@ -6,8 +6,14 @@ class Alarma {
   /// Identificador único de la alarma.
   final int id;
 
-  /// Fecha y hora exacta del próximo disparo.
+  /// Fecha y hora exacta del próximo disparo (puede ser hora de snooze).
   DateTime hora;
+
+  /// Hora del día configurada por el usuario. No cambia al posponer.
+  int horaDelDia;
+
+  /// Minuto configurado por el usuario. No cambia al posponer.
+  int minutoDelDia;
 
   /// Texto descriptivo que muestra el usuario (ej: "Despertar a María").
   String etiqueta;
@@ -29,12 +35,18 @@ class Alarma {
     this.activa = true,
     this.pospuesta = false,
     List<int>? diasSemana,
-  }) : diasSemana = diasSemana ?? [];
+    int? horaDelDia,
+    int? minutoDelDia,
+  })  : diasSemana = diasSemana ?? [],
+        horaDelDia = horaDelDia ?? hora.hour,
+        minutoDelDia = minutoDelDia ?? hora.minute;
 
   /// Convierte la alarma a un mapa JSON para persistencia.
   Map<String, dynamic> toJson() => {
     'id': id,
     'hora': hora.toIso8601String(),
+    'horaDelDia': horaDelDia,
+    'minutoDelDia': minutoDelDia,
     'etiqueta': etiqueta,
     'activa': activa,
     'pospuesta': pospuesta,
@@ -43,14 +55,18 @@ class Alarma {
 
   /// Crea una instancia de Alarma desde un mapa JSON.
   factory Alarma.fromJson(Map<String, dynamic> json) {
+    final hora = DateTime.parse(json['hora'] as String);
     final alarma = Alarma(
       id: json['id'] as int,
-      hora: DateTime.parse(json['hora'] as String),
+      hora: hora,
       etiqueta: json['etiqueta'] as String,
       diasSemana: (json['diasSemana'] as List<dynamic>?)
               ?.map((e) => e as int)
               .toList() ??
           [],
+      // Fallback a hora.hour/minute para datos guardados antes de este campo.
+      horaDelDia: (json['horaDelDia'] as int?) ?? hora.hour,
+      minutoDelDia: (json['minutoDelDia'] as int?) ?? hora.minute,
     );
     alarma.activa = json['activa'] as bool;
     alarma.pospuesta = (json['pospuesta'] as bool?) ?? false;
@@ -65,6 +81,8 @@ class Alarma {
     bool? activa,
     bool? pospuesta,
     List<int>? diasSemana,
+    int? horaDelDia,
+    int? minutoDelDia,
   }) {
     return Alarma(
       id: id ?? this.id,
@@ -73,6 +91,8 @@ class Alarma {
       activa: activa ?? this.activa,
       pospuesta: pospuesta ?? this.pospuesta,
       diasSemana: diasSemana ?? List<int>.from(this.diasSemana),
+      horaDelDia: horaDelDia ?? this.horaDelDia,
+      minutoDelDia: minutoDelDia ?? this.minutoDelDia,
     );
   }
 
