@@ -3,25 +3,22 @@ import 'package:flutter/services.dart';
 
 import '../utils/date_utils.dart';
 
-/// Widget interactivo que requiere deslizar en una dirección aleatoria
+/// Widget interactivo invisible que requiere deslizar en una dirección aleatoria
 /// para confirmar una acción (como apagar una alarma).
 ///
-/// La dirección se elige aleatoriamente al crear el widget y cambia cada vez
-/// que el usuario intenta deslizar en la dirección incorrecta o no alcanza
-/// el umbral requerido.
-///
-/// Incluye retroalimentación visual:
-/// - Flecha indicando la dirección correcta
-/// - Barra de progreso que se llena conforme el usuario desliza
-/// - Vibración háptica al alcanzar el umbral
+/// El widget es completamente invisible — solo muestra una barra de progreso
+/// sutil conforme el usuario arrastra. La dirección se indica fuera del widget
+/// mediante el callback `onDireccionCambiada`.
 class SlideDesbloqueo extends StatefulWidget {
   final VoidCallback onDesbloqueado;
   final double umbral;
+  final ValueChanged<String>? onDireccionCambiada;
 
   const SlideDesbloqueo({
     super.key,
     required this.onDesbloqueado,
     this.umbral = 0.75,
+    this.onDireccionCambiada,
   });
 
   @override
@@ -34,13 +31,13 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
   Offset _arrastre = Offset.zero;
   bool _completado = false;
   late AnimationController _animacionReset;
-  late AnimationController _pulseController;
   double _anchoDisponible = 0.0;
 
   @override
   void initState() {
     super.initState();
     _direccionObjetivo = direccionAleatoria();
+    _notificarDireccion();
     _animacionReset = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -51,24 +48,23 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
           });
         }
       });
-
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
     _animacionReset.dispose();
-    _pulseController.dispose();
     super.dispose();
+  }
+
+  void _notificarDireccion() {
+    widget.onDireccionCambiada?.call(textoDireccion(_direccionObjetivo));
   }
 
   void _cambiarDireccion() {
     setState(() {
       _direccionObjetivo = direccionAleatoria();
     });
+    _notificarDireccion();
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
@@ -127,7 +123,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
   Color _colorProgreso(double progreso) {
     if (progreso >= widget.umbral) return Colors.green;
     if (progreso > 0.5) return Colors.orange;
-    return Colors.grey.shade300;
+    return Colors.white.withValues(alpha: 0.3);
   }
 
   @override
@@ -140,63 +136,24 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
         return GestureDetector(
           onPanUpdate: _onPanUpdate,
           onPanEnd: _onPanEnd,
+          behavior: HitTestBehavior.translucent,
           child: SizedBox(
-            height: 80,
+            height: 120,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Fondo de la pista
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade800,
-                    borderRadius: BorderRadius.circular(40),
-                    border: Border.all(
-                      color: _colorProgreso(progreso).withValues(alpha: 0.5),
-                      width: 2,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedBuilder(
-                        animation: _pulseController,
-                        builder: (context, child) {
-                          final scale = 1.0 + (_pulseController.value * 0.15);
-                          return Transform.scale(
-                            scale: scale,
-                            child: child,
-                          );
-                        },
-                        child: Icon(
-                          iconoDireccion(_direccionObjetivo),
-                          color: Colors.white.withValues(alpha: 0.6),
-                          size: 28,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Desliza para apagar',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Barra de progreso
+                // Línea sutil de progreso (invisible hasta que se arrastra)
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 100),
-                  width: _anchoDisponible * progreso,
-                  height: 80,
+                  width: _anchoDisponible * 0.8 * progreso,
+                  height: 4,
                   decoration: BoxDecoration(
-                    color: _colorProgreso(progreso).withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(40),
+                    color: _colorProgreso(progreso).withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
 
-                // Control deslizante
+                // Control deslizante (visible desde el inicio)
                 AnimatedOpacity(
                   opacity: _completado ? 0.0 : 1.0,
                   duration: const Duration(milliseconds: 300),
@@ -206,19 +163,23 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
                       width: 64,
                       height: 64,
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary,
+                        color: Colors.white.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.4),
+                          width: 2,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
+                            color: Colors.black.withValues(alpha: 0.2),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
                         ],
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.power_settings_new_rounded,
-                        color: Colors.white,
+                        color: Colors.white.withValues(alpha: 0.7),
                         size: 28,
                       ),
                     ),

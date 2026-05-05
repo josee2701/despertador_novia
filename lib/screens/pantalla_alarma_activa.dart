@@ -12,10 +12,9 @@ import '../widgets/slide_desbloqueo.dart';
 /// - Fondo con gradiente oscuro
 /// - Etiqueta de la alarma centrada arriba
 /// - Hora actual en grande en el centro
-/// - Widget de deslizar aleatorio en la parte inferior
-///
-/// La alarma solo se puede apagar completando el gesto de deslizar en la
-/// dirección correcta (aleatoria).
+/// - Instrucción de dirección debajo de la hora
+/// - Widget de deslizar invisible en la parte inferior
+/// - Countdown de 5s tras desbloqueo exitoso
 class PantallaAlarmaActiva extends StatefulWidget {
   final Alarma alarma;
   final VoidCallback onDetener;
@@ -41,28 +40,31 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   Timer? _timerBotones;
   late AnimationController _pulseController;
 
+  bool _desbloqueado = false;
+  int _countdownSegundos = 5;
+  Timer? _countdownTimer;
+
+  String _direccionTexto = 'desliza →';
+
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-    // Actualizar la hora cada segundo
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() => _ahora = DateTime.now());
+      if (mounted) setState(() => _ahora = DateTime.now());
     });
 
-    // Mostrar botones de emergencia después de 10 segundos
     _timerBotones = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_contadorBotones <= 1) {
         t.cancel();
-        setState(() => _mostrarBotones = true);
+        if (mounted) setState(() => _mostrarBotones = true);
       } else {
-        setState(() => _contadorBotones--);
+        if (mounted) setState(() => _contadorBotones--);
       }
     });
 
-    // Animación de pulso para el ícono
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -73,6 +75,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   void dispose() {
     _timer?.cancel();
     _timerBotones?.cancel();
+    _countdownTimer?.cancel();
     _pulseController.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([]);
@@ -87,6 +90,29 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   void _posponer() {
     widget.onPosponer();
     if (mounted) Navigator.of(context).pop();
+  }
+
+  void _onDireccionCambiada(String direccion) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _direccionTexto = direccion);
+    });
+  }
+
+  void _iniciarCountdown() {
+    if (!mounted) return;
+    setState(() {
+      _desbloqueado = true;
+      _countdownSegundos = 5;
+    });
+
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (_countdownSegundos <= 1) {
+        t.cancel();
+        if (mounted) _detener();
+      } else {
+        if (mounted) setState(() => _countdownSegundos--);
+      }
+    });
   }
 
   @override
@@ -115,7 +141,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
               children: [
                 const Spacer(flex: 1),
 
-                // Etiqueta de la alarma
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: Row(
@@ -146,7 +171,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
                 const SizedBox(height: 12),
 
-                // Indicador de recurrencia
                 if (widget.alarma.diasSemana.isNotEmpty)
                   Text(
                     widget.alarma.diasSemana.length == 7
@@ -164,7 +188,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
                 const Spacer(flex: 1),
 
-                // Hora actual en grande con animación de pulso
                 AnimatedBuilder(
                   animation: _pulseController,
                   builder: (context, child) {
@@ -204,26 +227,41 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
                 const Spacer(flex: 1),
 
-                // Indicador de acción
-                Text(
-                  'Apaga la alarma deslizándola',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.5),
-                    fontSize: 14,
+                if (_desbloqueado)
+                  _CountdownWidget(segundos: _countdownSegundos)
+                else
+                  Column(
+                    children: [
+                      Text(
+                        'Para apagar, $_direccionTexto',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Desliza en esa dirección sobre el botón',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.35),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 32),
 
-                // Widget de deslizado aleatorio
-                SlideDesbloqueo(
-                  onDesbloqueado: _detener,
-                  umbral: 0.75,
-                ),
+                if (!_desbloqueado)
+                  SlideDesbloqueo(
+                    onDesbloqueado: _iniciarCountdown,
+                    umbral: 0.75,
+                    onDireccionCambiada: _onDireccionCambiada,
+                  ),
 
                 const SizedBox(height: 24),
 
-                // Botones de emergencia
                 if (_mostrarBotones)
                   FadeIn(
                     child: Row(
@@ -269,7 +307,71 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   }
 }
 
-/// Widget de animación de fade-in simple.
+class _CountdownWidget extends StatelessWidget {
+  final int segundos;
+
+  const _CountdownWidget({required this.segundos});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          '¡Alarma detenida!',
+          style: TextStyle(
+            color: Colors.green.withValues(alpha: 0.9),
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: 72,
+              height: 72,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(
+                  begin: 1.0,
+                  end: segundos / 5.0,
+                ),
+                duration: const Duration(milliseconds: 300),
+                builder: (context, value, _) {
+                  return CircularProgressIndicator(
+                    value: value,
+                    strokeWidth: 4,
+                    backgroundColor: Colors.white.withValues(alpha: 0.1),
+                    valueColor: AlwaysStoppedAnimation(
+                      Colors.green.withValues(alpha: 0.8),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Text(
+              '$segundos',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.w300,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Sonando por última vez...',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.4),
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class FadeIn extends StatefulWidget {
   final Widget child;
   const FadeIn({super.key, required this.child});

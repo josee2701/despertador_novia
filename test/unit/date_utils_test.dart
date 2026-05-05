@@ -1,42 +1,32 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:despertador_novia/utils/date_utils.dart' as utils;
 
 void main() {
   group('proximaFecha', () {
     test('alarma diaria sin días: mañana si ya pasó hoy', () {
-      // Simulamos una alarma a las 8:00 cuando son las 10:00
       final resultado = utils.proximaFecha(8, 0, []);
-
-      // Debería ser mañana a las 8:00
       final esperado = DateTime.now();
       final manana = DateTime(esperado.year, esperado.month, esperado.day + 1, 8, 0);
       expect(resultado, manana);
     });
 
     test('alarma diaria sin días: hoy si no ha pasado', () {
-      // Simulamos una alarma a las 23:00 (futuro)
       final resultado = utils.proximaFecha(23, 59, []);
-
-      // Debería ser hoy a las 23:59
       final ahora = DateTime.now();
       final esperado = DateTime(ahora.year, ahora.month, ahora.day, 23, 59);
       expect(resultado, esperado);
     });
 
     test('alarma con días: encuentra un día válido', () {
-      // Alarma programada para todos los días pares
       final resultado = utils.proximaFecha(8, 0, [1, 3, 5]);
-
       expect([1, 3, 5], contains(resultado.weekday));
       expect(resultado.hour, 8);
       expect(resultado.minute, 0);
     });
 
     test('alarma con múltiples días: elige un día válido', () {
-      // Alarma para martes y jueves
       final resultado = utils.proximaFecha(14, 0, [2, 4]);
-
       expect([2, 4], contains(resultado.weekday));
     });
   });
@@ -107,35 +97,30 @@ void main() {
     test('menos de una hora', () {
       final ahora = DateTime(2026, 5, 4, 10, 0);
       final alarma = DateTime(2026, 5, 4, 10, 30);
-
       expect(utils.textoTiempoRestante(alarma, ahora), '30min');
     });
 
     test('varias horas y minutos', () {
       final ahora = DateTime(2026, 5, 4, 10, 0);
       final alarma = DateTime(2026, 5, 4, 12, 15);
-
       expect(utils.textoTiempoRestante(alarma, ahora), '2h 15min');
     });
 
     test('solo una hora exacta', () {
       final ahora = DateTime(2026, 5, 4, 10, 0);
       final alarma = DateTime(2026, 5, 4, 11, 0);
-
       expect(utils.textoTiempoRestante(alarma, ahora), '1h 0min');
     });
 
     test('null si la alarma ya pasó', () {
       final ahora = DateTime(2026, 5, 4, 10, 0);
       final alarma = DateTime(2026, 5, 4, 9, 0);
-
       expect(utils.textoTiempoRestante(alarma, ahora), isNull);
     });
 
     test('null si la alarma es exactamente ahora', () {
       final ahora = DateTime(2026, 5, 4, 10, 0);
       final alarma = DateTime(2026, 5, 4, 10, 0);
-
       expect(utils.textoTiempoRestante(alarma, ahora), isNull);
     });
   });
@@ -144,12 +129,10 @@ void main() {
     test('siempre devuelve uno de los 4 vectores válidos', () {
       for (var i = 0; i < 100; i++) {
         final dir = utils.direccionAleatoria();
-
         final esValida = (dir == const Offset(1, 0) ||
             dir == const Offset(-1, 0) ||
             dir == const Offset(0, 1) ||
             dir == const Offset(0, -1));
-
         expect(esValida, isTrue, reason: 'Dirección inválida: $dir');
       }
     });
