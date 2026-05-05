@@ -1,4 +1,4 @@
-package com.example.despertador_novia
+package com.soy.josec.bella_durmiente
 
 import io.flutter.embedding.android.FlutterActivity
 
