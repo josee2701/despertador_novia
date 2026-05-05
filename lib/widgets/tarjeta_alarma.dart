@@ -169,12 +169,12 @@ class TarjetaAlarma extends StatelessWidget {
                         if (alarma.diasSemana.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Row(
+                            child: Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
                               children: List.generate(7, (i) {
                                 final activo = alarma.diasSemana.contains(i + 1);
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 4),
-                                  child: AnimatedContainer(
+                                return AnimatedContainer(
                                     duration: const Duration(milliseconds: 200),
                                     width: 28,
                                     height: 22,
@@ -202,8 +202,7 @@ class TarjetaAlarma extends StatelessWidget {
                                         ),
                                       ),
                                     ),
-                                  ),
-                                );
+                                  );
                               }),
                             ),
                           ),
