@@ -232,6 +232,16 @@ class AlarmasPresenter {
     _view.onAlarmaEliminada();
   }
 
+  /// Restaura una alarma previamente eliminada (para undo).
+  Future<void> restaurarAlarma(Alarma alarma) async {
+    _alarmas.add(alarma);
+    if (alarma.activa) {
+      await _alarmService.programar(alarma);
+    }
+    await _guardarAlarmas();
+    _view.onAlarmaAgregada();
+  }
+
   /// Actualiza la hora de una alarma y la reprograma.
   Future<void> actualizarHora(Alarma alarma, int nuevaHora, int nuevoMinuto) async {
     final ahora = DateTime.now();
@@ -330,7 +340,7 @@ class AlarmasPresenter {
     return candidatas.isEmpty ? null : candidatas.first;
   }
 
-  /// Devuelve el texto de tiempo restante para la próxima alarma.
+  /// Devuelve el texto de la próxima alarma: "Próxima alarma: [nombre] en [tiempo]".
   String obtenerTextoProximaAlarma() {
     final proxima = obtenerProximaAlarma();
     if (proxima == null) return 'No hay alarmas programadas';
@@ -338,7 +348,7 @@ class AlarmasPresenter {
     final tiempo = textoTiempoRestante(proxima.hora, _ahora);
     if (tiempo == null) return 'No hay alarmas programadas';
 
-    return 'en $tiempo';
+    return '${proxima.etiqueta} en $tiempo';
   }
 
   /// Posponer una alarma activa por 5 minutos.

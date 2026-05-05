@@ -1,18 +1,38 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:despertador_novia/main.dart';
 
 void main() {
-  testWidgets('La pantalla principal muestra el mensaje vacío', (WidgetTester tester) async {
-    await tester.pumpWidget(const MiDespertadorApp());
+  TestWidgetsFlutterBinding.ensureInitialized();
 
-    expect(find.text('No hay alarmas\nPresiona + para agregar una'), findsOneWidget);
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  group('Widget tests - Pantalla principal', () {
+    testWidgets('Muestra mensaje de estado vacío cuando no hay alarmas', (WidgetTester tester) async {
+      await tester.pumpWidget(const MiDespertadorApp());
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('No tienes alarmas'), findsOneWidget);
+      expect(find.text('Toca + para crear tu primera alarma'), findsOneWidget);
+    });
+
+    testWidgets('Muestra botón de agregar alarma', (WidgetTester tester) async {
+      await tester.pumpWidget(const MiDespertadorApp());
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('Nueva alarma'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+    });
+
+    testWidgets('Muestra título de la pantalla', (WidgetTester tester) async {
+      await tester.pumpWidget(const MiDespertadorApp());
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('Mis Alarmas'), findsOneWidget);
+    });
   });
 }

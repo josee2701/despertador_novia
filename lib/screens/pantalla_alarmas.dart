@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
 import '../screens/pantalla_alarma_activa.dart';
-import '../widgets/editor_alarma.dart';
-import '../widgets/reloj_widget.dart';
+import '../widgets/dialogo_alarma.dart';
 import '../widgets/tarjeta_alarma.dart';
 
 /// Pantalla principal de la app — Vista del patrón MVP.
@@ -26,8 +26,8 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     with WidgetsBindingObserver
     implements AlarmasView {
   late final AlarmasPresenter _presenter;
-  int? _idEditando;
   bool _modoNoMolestar = false;
+  bool _animarFAB = false;
 
   @override
   void initState() {
@@ -35,6 +35,14 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     WidgetsBinding.instance.addObserver(this);
     _presenter = AlarmasPresenter(view: this);
     _presenter.iniciar();
+
+    // Activar animación del FAB si no hay alarmas
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final alarmas = _presenter.alarmas;
+      if (alarmas.isEmpty && mounted) {
+        setState(() => _animarFAB = true);
+      }
+    });
   }
 
   @override
@@ -60,7 +68,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   void onAlarmaAgregada() {
-    if (mounted) setState(() => _idEditando = null);
+    if (mounted) setState(() => _animarFAB = false);
   }
 
   @override
@@ -70,7 +78,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   void onAlarmaEliminada() {
-    if (mounted) setState(() => _idEditando = null);
+    if (mounted) setState(() => _animarFAB = _presenter.alarmas.isEmpty);
   }
 
   @override
@@ -110,79 +118,78 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   // ─── Acciones del usuario ───────────────────────────────────────
 
-  /// Muestra el diálogo para crear una nueva alarma.
+  /// Abre el diálogo unificado para crear una nueva alarma.
   Future<void> _agregarAlarma() async {
-    final horaElegida = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      builder: (context, child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-          child: child!,
-        );
-      },
-    );
-    if (horaElegida == null || !mounted) return;
+    if (!mounted) return;
 
-    final controlador = TextEditingController();
-    final etiqueta = await showDialog<String>(
+    await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nombre de la alarma'),
-        content: TextField(
-          controller: controlador,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Ej: Despertar a María',
-          ),
-          onSubmitted: (v) => Navigator.pop(ctx, v),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controlador.text),
-            child: const Text('Guardar'),
-          ),
-        ],
+      builder: (ctx) => DialogoAlarma(
+        onGuardar: (hora, minuto, etiqueta, dias) async {
+          Navigator.pop(ctx);
+          await _presenter.agregarAlarma(
+            hora: hora,
+            minuto: minuto,
+            etiqueta: etiqueta.trim().isEmpty ? 'Alarma' : etiqueta.trim(),
+            diasSemana: dias,
+          );
+        },
       ),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) => controlador.dispose());
-    if (etiqueta == null || !mounted) return;
+  }
 
-    await _presenter.agregarAlarma(
-      hora: horaElegida.hour,
-      minuto: horaElegida.minute,
-      etiqueta: etiqueta.trim().isEmpty ? 'Alarma' : etiqueta.trim(),
-      diasSemana: [],
+  /// Abre el diálogo unificado para editar una alarma existente.
+  Future<void> _editarAlarma(Alarma alarma) async {
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => DialogoAlarma(
+        alarma: alarma,
+        onGuardar: (hora, minuto, etiqueta, dias) async {
+          Navigator.pop(ctx);
+          _presenter.actualizarAlarmaCompleta(
+            alarma: alarma,
+            nuevaHora: hora,
+            nuevoMinuto: minuto,
+            nuevaEtiqueta: etiqueta,
+            nuevosDias: dias,
+          );
+        },
+      ),
     );
   }
 
-  /// Alterna el modo de edición de una alarma.
-  void _toggleEdicion(int id) {
-    setState(() {
-      _idEditando = _idEditando == id ? null : id;
-    });
-  }
+  /// Elimina una alarma con opción de deshacer (SnackBar).
+  void _eliminarConUndo(Alarma alarma) {
+    final copia = alarma.copyWith();
 
-  /// Cancela la edición de una alarma.
-  void _cancelarEdicion() {
-    setState(() => _idEditando = null);
-  }
+    _presenter.eliminarAlarma(alarma);
 
-  /// Guarda los cambios de una alarma editada.
-  void _guardarEdicion(Alarma alarma) {
-    _presenter.actualizarAlarmaCompleta(
-      alarma: alarma,
-      nuevaHora: alarma.hora.hour,
-      nuevoMinuto: alarma.hora.minute,
-      nuevaEtiqueta: alarma.etiqueta,
-      nuevosDias: alarma.diasSemana,
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.inversePrimary),
+            const SizedBox(width: 12),
+            const Text('Alarma eliminada'),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        action: SnackBarAction(
+          label: 'Deshacer',
+          textColor: Theme.of(context).colorScheme.inversePrimary,
+          onPressed: () {
+            _presenter.restaurarAlarma(copia);
+          },
+        ),
+      ),
     );
-    setState(() => _idEditando = null);
   }
 
   /// Muestra el diálogo para solicitar permisos de alarma exacta.
@@ -220,63 +227,89 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   @override
   Widget build(BuildContext context) {
     final alarmas = _presenter.alarmas;
+    final proximaTexto = _presenter.obtenerTextoProximaAlarma();
+    final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text('Mis Alarmas'),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
+        elevation: 0,
       ),
       body: Column(
         children: [
-          // ── Header con reloj y próxima alarma ──
+          // ── Header: próxima alarma ──
           Container(
             width: double.infinity,
-            margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
+              gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF0D47A1),
-                  Color(0xFF1976D2),
-                  Color(0xFF42A5F5),
+                  const Color(0xFF0D47A1),
+                  Theme.of(context).colorScheme.primary,
                 ],
               ),
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF1565C0).withValues(alpha: 0.3),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
             child: Column(
               children: [
-                RelojWidget(ahora: _presenter.ahora),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.alarm,
-                      color: Colors.white.withValues(alpha: 0.6),
-                      size: 16,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _presenter.obtenerTextoProximaAlarma(),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontSize: 14,
+                if (hayAlarmas)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.alarm,
+                        color: Colors.white,
+                        size: 20,
                       ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Próxima alarma: $proximaTexto',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.nights_stay_outlined,
+                        color: Colors.white.withValues(alpha: 0.8),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        proximaTexto,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 15,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -290,10 +323,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                 color: Theme.of(context)
                     .colorScheme
                     .errorContainer
-                    .withValues(alpha: 0.3),
+                    .withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.errorContainer,
+                  color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.4),
                 ),
               ),
               child: Row(
@@ -329,16 +362,28 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.alarm_add_outlined,
-                          size: 100,
-                          color: Colors.grey[300],
+                        // Animación sutil del ícono
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.95, end: 1.0),
+                          duration: const Duration(milliseconds: 1500),
+                          curve: Curves.easeInOut,
+                          builder: (context, value, child) {
+                            return Transform.scale(
+                              scale: value,
+                              child: child,
+                            );
+                          },
+                          child: Icon(
+                            Icons.alarm_add_outlined,
+                            size: 72,
+                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'No tienes alarmas',
                           style: TextStyle(
-                            fontSize: 22,
+                            fontSize: 20,
                             fontWeight: FontWeight.w600,
                             color: Colors.grey[600],
                           ),
@@ -359,43 +404,90 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     itemCount: alarmas.length,
                     itemBuilder: (context, index) {
                       final alarma = alarmas[index];
-                      final estaEditando = _idEditando == alarma.id;
-
-                      return Column(
-                        children: [
-                          TarjetaAlarma(
-                            alarma: alarma,
-                            onToggle: (v) => _presenter.toggleAlarma(alarma, v),
-                            onEliminar: () => _presenter.eliminarAlarma(alarma),
-                            onTap: () => _toggleEdicion(alarma.id),
-                          ),
-                          if (estaEditando)
-                            AnimatedSlide(
-                              offset: Offset.zero,
-                              duration: const Duration(milliseconds: 300),
-                              child: Padding(
-                                padding: const EdgeInsets.only(
-                                  left: 16,
-                                  right: 16,
-                                  bottom: 12,
-                                ),
-                                child: EditorAlarma(
-                                  alarma: alarma,
-                                  onGuardar: () => _guardarEdicion(alarma),
-                                  onCancelar: _cancelarEdicion,
-                                ),
-                              ),
+                      return TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0.0, end: 1.0),
+                        duration: Duration(milliseconds: 300 + (index * 100)),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, value, child) {
+                          return Transform.translate(
+                            offset: Offset(0, 30 * (1 - value)),
+                            child: Opacity(
+                              opacity: value,
+                              child: child,
                             ),
-                        ],
+                          );
+                        },
+                        child: RepaintBoundary(
+                          child: TarjetaAlarma(
+                            alarma: alarma,
+                            onToggle: (v) {
+                              _presenter.toggleAlarma(alarma, v);
+                              HapticFeedback.selectionClick();
+                            },
+                            onEliminar: () => _eliminarConUndo(alarma),
+                            onTap: () => _editarAlarma(alarma),
+                          ),
+                        ),
                       );
                     },
                   ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _agregarAlarma,
-        child: const Icon(Icons.add),
+      floatingActionButton: _animarFAB && alarmas.isEmpty
+          ? _FABAnimado(onTap: _agregarAlarma)
+          : FloatingActionButton.extended(
+              onPressed: _agregarAlarma,
+              icon: const Icon(Icons.add),
+              label: const Text('Nueva alarma'),
+              elevation: 4,
+            ),
+    );
+  }
+}
+
+/// FAB con animación de pulso sutil para llamar la atención cuando no hay alarmas.
+class _FABAnimado extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _FABAnimado({required this.onTap});
+
+  @override
+  State<_FABAnimado> createState() => _FABAnimadoState();
+}
+
+class _FABAnimadoState extends State<_FABAnimado>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _animation,
+      child: FloatingActionButton.extended(
+        onPressed: widget.onTap,
+        icon: const Icon(Icons.add),
+        label: const Text('Nueva alarma'),
+        elevation: 6,
       ),
     );
   }

@@ -72,7 +72,7 @@ class Alarma {
       etiqueta: etiqueta ?? this.etiqueta,
       activa: activa ?? this.activa,
       pospuesta: pospuesta ?? this.pospuesta,
-      diasSemana: diasSemana ?? this.diasSemana,
+      diasSemana: diasSemana ?? List<int>.from(this.diasSemana),
     );
   }
 

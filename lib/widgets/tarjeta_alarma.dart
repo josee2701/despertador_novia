@@ -6,19 +6,12 @@ import '../utils/date_utils.dart';
 
 /// Tarjeta individual que muestra una alarma en la lista principal.
 ///
-/// Muestra la hora, etiqueta, días de repetición y el interruptor de activación.
-/// Soporta ser deslizada para eliminar (Dismissible).
+/// Muestra la hora en formato AM/PM, etiqueta, días de repetición
+/// y el interruptor de activación. Soporta swipe para eliminar.
 class TarjetaAlarma extends StatelessWidget {
-  /// La alarma a mostrar.
   final Alarma alarma;
-
-  /// Callback cuando el usuario activa/desactiva la alarma.
   final ValueChanged<bool> onToggle;
-
-  /// Callback cuando el usuario desliza para eliminar.
   final VoidCallback onEliminar;
-
-  /// Callback cuando el usuario toca la tarjeta para editar.
   final VoidCallback onTap;
 
   const TarjetaAlarma({
@@ -31,6 +24,10 @@ class TarjetaAlarma extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final esHoy = _esParaHoy();
+    final icono = iconoSegunHora(alarma.hora.hour);
+    final horaAMPM = formatearHoraAMPM(alarma.hora);
+
     return Dismissible(
       key: ValueKey(alarma.id),
       direction: DismissDirection.endToStart,
@@ -39,139 +36,202 @@ class TarjetaAlarma extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: Colors.red,
+          gradient: LinearGradient(
+            colors: [Colors.red[400]!, Colors.red[700]!],
+          ),
           borderRadius: BorderRadius.circular(20),
         ),
-        child: const Icon(Icons.delete, color: Colors.white),
+        child: const Icon(Icons.delete_forever, color: Colors.white, size: 28),
       ),
-      child: Card(
-        elevation: 2,
-        surfaceTintColor: Theme.of(context).colorScheme.surfaceTint,
-        color: alarma.activa ? Colors.white : Colors.grey[200],
-        margin: const EdgeInsets.only(bottom: 12.0),
-        shadowColor: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
-          child: ListTile(
-            onTap: onTap,
-            leading: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primaryContainer
-                    .withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                Icons.alarm,
-                color: Theme.of(context).colorScheme.onPrimaryContainer,
-                size: 24,
-              ),
-            ),
-            title: Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  formatearHora(alarma.hora),
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w600,
-                    color: alarma.activa ? Colors.black87 : Colors.grey,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  periodo(alarma.hora),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: alarma.activa
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.notifications_none_rounded,
-                      size: 14,
-                      color: alarma.activa ? Colors.grey[600] : Colors.grey,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      alarma.etiqueta,
-                      style: TextStyle(
-                        color: alarma.activa ? Colors.grey[700] : Colors.grey,
-                        fontSize: 13,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: alarma.activa ? 1.0 : 0.65,
+        child: Card(
+          elevation: alarma.activa ? 2 : 0,
+          surfaceTintColor: Theme.of(context).colorScheme.surfaceTint,
+          color: alarma.activa ? Colors.white : Colors.grey[200],
+          margin: const EdgeInsets.only(bottom: 12.0),
+          shadowColor: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(16),
+              child: Row(
+                children: [
+                  // Icono dinámico según hora del día
+                  Stack(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Theme.of(context).colorScheme.primaryContainer.withValues(alpha: alarma.activa ? 0.6 : 0.3),
+                              Theme.of(context).colorScheme.primaryContainer.withValues(alpha: alarma.activa ? 0.3 : 0.15),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          icono,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          size: 24,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                if (alarma.pospuesta)
-                  const Text(
-                    'Pospuesta',
-                    style: TextStyle(
-                      color: Colors.orange,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                if (alarma.diasSemana.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Row(
-                      children: List.generate(7, (i) {
-                        final activo = alarma.diasSemana.contains(i + 1);
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 5),
-                          child: Text(
-                            nombresDias[i],
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight:
-                                  activo ? FontWeight.w700 : FontWeight.normal,
-                              color: activo
-                                  ? (alarma.activa
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.grey)
-                                  : Colors.grey[300],
+                      if (alarma.pospuesta)
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 1.5),
                             ),
                           ),
-                        );
-                      }),
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(width: 14),
+
+                  // Contenido principal
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              horaAMPM,
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w700,
+                                color: alarma.activa ? Colors.black87 : Colors.grey,
+                              ),
+                            ),
+                            if (esHoy) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Theme.of(context).colorScheme.primary,
+                                      Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: const Text(
+                                  'HOY',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+
+                        // Etiqueta
+                        Text(
+                          alarma.etiqueta,
+                          style: TextStyle(
+                            color: alarma.activa ? Colors.grey[700] : Colors.grey,
+                            fontSize: 13,
+                          ),
+                        ),
+
+                        // Días de repetición como chips pequeños
+                        if (alarma.diasSemana.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(
+                              children: List.generate(7, (i) {
+                                final activo = alarma.diasSemana.contains(i + 1);
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 4),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    width: 28,
+                                    height: 22,
+                                    decoration: BoxDecoration(
+                                      gradient: activo
+                                          ? LinearGradient(
+                                              colors: alarma.activa
+                                                  ? [
+                                                      Theme.of(context).colorScheme.primary,
+                                                      Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                                    ]
+                                                  : [Colors.grey[400]!, Colors.grey[500]!],
+                                            )
+                                          : null,
+                                      color: activo ? null : Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        nombresDias[i],
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: activo ? FontWeight.w700 : FontWeight.normal,
+                                          color: activo ? Colors.white : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-              ],
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.edit_outlined,
-                  size: 18,
-                  color: alarma.activa ? Colors.grey[500] : Colors.grey,
-                ),
-                const SizedBox(width: 8),
-                Switch(
-                  value: alarma.activa,
-                  onChanged: onToggle,
-                  activeTrackColor: Theme.of(context).colorScheme.primary,
-                ),
-              ],
+
+                  // Switch de activación
+                  Transform.scale(
+                    scale: 0.85,
+                    child: Switch(
+                      value: alarma.activa,
+                      onChanged: onToggle,
+                      activeTrackColor: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// Verifica si la alarma está programada para hoy.
+  bool _esParaHoy() {
+    final ahora = DateTime.now();
+    return alarma.hora.year == ahora.year &&
+        alarma.hora.month == ahora.month &&
+        alarma.hora.day == ahora.day;
   }
 }
