@@ -337,6 +337,18 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                     fontStyle: FontStyle.italic,
                   ),
                 ),
+                // ← NUEVO: Texto informativo sobre confirmación
+                const SizedBox(height: 4),
+                Text(
+                  'Al cerrar la alarma, sonará nuevamente a los 30 segundos\n'
+                  'para confirmar que estás despierto (no aplica al posponer)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey[400],
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
               ],
 
               const SizedBox(height: 24),

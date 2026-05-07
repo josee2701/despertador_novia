@@ -487,6 +487,138 @@ void main() {
     });
   });
 
+  // ── cerrarConConfirmacion ──────────────────────────────────────────────────
+
+  group('cerrarConConfirmacion', () {
+    test('detiene el audio actual antes de reprogramar', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+      alarm.detenidas.clear();
+
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+
+      expect(alarm.detenidas, contains(1),
+          reason: 'Debe llamar detener() para parar el audio actual');
+    });
+
+    test('marca confirmacionPendiente y programa alarma 30s en el futuro', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+      alarm.programadas.clear();
+
+      final antes = DateTime.now();
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+      final despues = DateTime.now();
+
+      expect(presenter.alarmas.first.confirmacionPendiente, isTrue);
+      expect(alarm.programadas, hasLength(1));
+      final hora = alarm.programadas.first.hora;
+      expect(
+        hora.isAfter(antes.add(const Duration(seconds: 25))) &&
+            hora.isBefore(despues.add(const Duration(seconds: 35))),
+        isTrue,
+        reason: 'La confirmación debe programarse ~30s en el futuro',
+      );
+    });
+
+    test('limpia _alarmaSonando y _alertaEnPantalla', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, activa: true)]);
+      alarm.sonandoIds.add(1);
+      await presenter.onAppResumed(); // establece _alarmaSonando
+      view.actualizadasCount = 0;
+
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+
+      expect(presenter.hayAlarmaSonando, isFalse,
+          reason: 'Tras cerrarConConfirmacion no debe haber alarma activa en UI');
+      expect(view.actualizadasCount, greaterThan(0));
+    });
+
+    test('no altera horaDelDia ni minutoDelDia', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, hora: 8, minuto: 45)]);
+
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+
+      expect(presenter.alarmas.first.horaDelDia, 8);
+      expect(presenter.alarmas.first.minutoDelDia, 45);
+    });
+  });
+
+  // ── detenerAlarma — confirmacion pendiente ─────────────────────────────────
+
+  group('detenerAlarma — confirmación pendiente', () {
+    test('confirmar alarma de una sola vez la desactiva definitivamente', () async {
+      final a = _alarmaSimple(id: 1, diasSemana: []);
+      await arrancar(alarmas: [a]);
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+
+      // Simular que la alarma de confirmación suena 30s después
+      await presenter.detenerAlarma(presenter.alarmas.first);
+
+      expect(presenter.alarmas.first.activa, isFalse,
+          reason: 'Confirmación final: una sola vez debe desactivarse');
+      expect(presenter.alarmas.first.confirmacionPendiente, isFalse);
+    });
+
+    test('confirmar alarma recurrente la reprograma (no la desactiva)', () async {
+      final a = _alarmaSimple(id: 2, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
+      await arrancar(alarmas: [a]);
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+      alarm.programadas.clear();
+
+      await presenter.detenerAlarma(presenter.alarmas.first);
+
+      expect(presenter.alarmas.first.activa, isTrue,
+          reason: 'Recurrente: debe seguir activa tras confirmar');
+      expect(presenter.alarmas.first.confirmacionPendiente, isFalse);
+      expect(alarm.programadas, hasLength(1),
+          reason: 'Debe reprogramarse para la siguiente ocurrencia');
+    });
+
+    test('no hay tercer disparo: confirmar no genera nueva confirmacion', () async {
+      final a = _alarmaSimple(id: 1, diasSemana: []);
+      await arrancar(alarmas: [a]);
+
+      // Primera alarma → cerrar con confirmación
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+      expect(presenter.alarmas.first.confirmacionPendiente, isTrue);
+
+      // Segunda alarma (confirmación) → detener definitivamente
+      await presenter.detenerAlarma(presenter.alarmas.first);
+      expect(presenter.alarmas.first.confirmacionPendiente, isFalse);
+      expect(presenter.alarmas.first.activa, isFalse,
+          reason: 'No debe generarse un tercer disparo');
+    });
+  });
+
+  // ── limpiarAlarmaSonandoExterna + confirmacion ─────────────────────────────
+
+  group('confirmacionPendiente se limpia al parar externamente', () {
+    test('_cargarAlarmas limpia confirmacionPendiente en alarma vencida', () async {
+      final a = _alarmaSimple(id: 1, activa: true, diasSemana: []);
+      a.confirmacionPendiente = true;
+      a.hora = DateTime(2020, 1, 1, 7, 0); // vencida
+      await arrancar(alarmas: [a]);
+
+      expect(presenter.alarmas.first.confirmacionPendiente, isFalse,
+          reason: 'Al cargar con hora vencida se debe limpiar confirmacionPendiente');
+      expect(presenter.alarmas.first.activa, isFalse);
+    });
+
+    test('onAppResumed limpia confirmacionPendiente si alarma ya no suena', () async {
+      final a = _alarmaSimple(id: 1, activa: true, diasSemana: []);
+      await arrancar(alarmas: [a]);
+      alarm.sonandoIds.add(1);
+      await presenter.onAppResumed(); // establece _alarmaSonando
+      presenter.alarmas.first.confirmacionPendiente = true;
+      alarm.sonandoIds.remove(1); // alarma parada externamente
+
+      await presenter.onAppResumed();
+
+      expect(presenter.alarmas.first.confirmacionPendiente, isFalse);
+      expect(presenter.alarmas.first.activa, isFalse,
+          reason: 'Una sola vez parada externamente durante confirmación debe desactivarse');
+    });
+  });
+
   // ── dispose ────────────────────────────────────────────────────────────────
 
   group('dispose', () {

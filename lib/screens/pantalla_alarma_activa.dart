@@ -19,12 +19,14 @@ class PantallaAlarmaActiva extends StatefulWidget {
   final Alarma alarma;
   final VoidCallback onDetener;
   final VoidCallback onPosponer;
+  final VoidCallback? onCerrarConConfirmacion; // ← NUEVO
 
   const PantallaAlarmaActiva({
     super.key,
     required this.alarma,
     required this.onDetener,
     required this.onPosponer,
+    this.onCerrarConConfirmacion, // ← NUEVO
   });
 
   @override
@@ -108,7 +110,17 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_countdownSegundos <= 1) {
         t.cancel();
-        if (mounted) _detener();
+        if (mounted) {
+          // Solo lanzar confirmación si (a) el callback existe Y (b) no es ya la confirmación.
+          // Sin la segunda condición → loop infinito.
+          if (widget.onCerrarConConfirmacion != null &&
+              !widget.alarma.confirmacionPendiente) {
+            widget.onCerrarConConfirmacion!();
+            Navigator.of(context).pop(); // ← cerrar pantalla tras lanzar confirmación
+          } else {
+            _detener(); // confirmación final o sin callback → detenida definitivamente
+          }
+        }
       } else {
         if (mounted) setState(() => _countdownSegundos--);
       }
@@ -228,7 +240,10 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                 const Spacer(flex: 1),
 
                 if (_desbloqueado)
-                  _CountdownWidget(segundos: _countdownSegundos)
+                  _CountdownWidget(
+                    segundos: _countdownSegundos,
+                    esConfirmacion: widget.alarma.confirmacionPendiente,
+                  )
                 else
                   Column(
                     children: [
@@ -309,15 +324,19 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
 class _CountdownWidget extends StatelessWidget {
   final int segundos;
+  final bool esConfirmacion; // ← NUEVO
 
-  const _CountdownWidget({required this.segundos});
+  const _CountdownWidget({
+    required this.segundos,
+    this.esConfirmacion = false, // ← NUEVO
+  });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Text(
-          '¡Alarma detenida!',
+          esConfirmacion ? '¡Confirma que estás despierto!' : '¡Alarma detenida!',
           style: TextStyle(
             color: Colors.green.withValues(alpha: 0.9),
             fontSize: 20,
@@ -332,10 +351,7 @@ class _CountdownWidget extends StatelessWidget {
               width: 72,
               height: 72,
               child: TweenAnimationBuilder<double>(
-                tween: Tween(
-                  begin: 1.0,
-                  end: segundos / 5.0,
-                ),
+                tween: Tween(begin: 1.0, end: segundos / 5.0),
                 duration: const Duration(milliseconds: 300),
                 builder: (context, value, _) {
                   return CircularProgressIndicator(
@@ -361,7 +377,7 @@ class _CountdownWidget extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Sonando por última vez...',
+          esConfirmacion ? '¡Buenos días!' : 'Sonando por última vez...',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.4),
             fontSize: 13,

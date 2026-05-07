@@ -145,6 +145,7 @@ class AlarmasPresenter {
   /// (OS, notificación del sistema, etc.) y reprograma si es recurrente.
   void _limpiarAlarmaSonandoExterna(Alarma alarma) {
     alarma.pospuesta = false;
+    alarma.confirmacionPendiente = false; // ← NUEVO: limpiar si se paró externamente
     _alarmaSonando = null;
     _alertaEnPantalla = false;
 
@@ -223,6 +224,7 @@ class AlarmasPresenter {
       _alarmaSonando = null;
       _alertaEnPantalla = false;
       alarma.pospuesta = false;
+      alarma.confirmacionPendiente = false; // ← NUEVO: limpiar si se paró externamente
 
       if (alarma.diasSemana.isNotEmpty) {
         alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
@@ -267,6 +269,8 @@ class AlarmasPresenter {
 
     for (final alarma in _alarmas) {
       if (alarma.activa && alarma.hora.isBefore(ahora)) {
+        // Limpiar confirmación vencida independientemente del tipo
+        alarma.confirmacionPendiente = false; // ← NUEVO
         if (alarma.diasSemana.isEmpty) {
           alarma.activa = false;
         } else {
@@ -451,16 +455,39 @@ class AlarmasPresenter {
   Future<void> detenerAlarma(Alarma alarma) async {
     await _alarmService.detener(alarma.id);
     alarma.pospuesta = false;
+    alarma.confirmacionPendiente = false;
 
     if (alarma.diasSemana.isNotEmpty) {
-      // Usar horaDelDia/minutoDelDia: alarma.hora puede contener la hora del snooze.
+      // Recurrente: siempre reprogramar (con o sin confirmación).
+      // Usar horaDelDia/minutoDelDia: alarma.hora puede contener la hora del snooze/confirmación.
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       await _alarmService.programar(alarma);
     } else {
-      alarma.activa = false; // una sola vez: desactivar al apagar
+      // Una sola vez: desactivar definitivamente.
+      alarma.activa = false;
     }
 
     await _guardarAlarmas();
+    _alarmaSonando = null;
+    _alertaEnPantalla = false;
+    _view.onAlarmaActualizada();
+  }
+
+  /// Cierra la pantalla de alarma y programa una re-activación a los 30 segundos
+  /// para que el usuario confirme que está despierto.
+  Future<void> cerrarConConfirmacion(Alarma alarma) async {
+    // Detener el audio actual antes de reprogramar (igual que posponerAlarma).
+    await _alarmService.detener(alarma.id);
+    alarma.confirmacionPendiente = true;
+    alarma.pospuesta = false;
+
+    // Programar el re-sonido a los 30 segundos
+    alarma.hora = DateTime.now().add(const Duration(seconds: 30));
+    await _alarmService.programar(alarma);
+
+    await _guardarAlarmas();
+
+    // Limpiar estado de alarma sonando para que la UI vuelva a la pantalla principal
     _alarmaSonando = null;
     _alertaEnPantalla = false;
     _view.onAlarmaActualizada();

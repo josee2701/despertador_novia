@@ -115,6 +115,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
           alarma: alarma,
           onDetener: () => _presenter.detenerAlarma(alarma),
           onPosponer: () => _presenter.posponerAlarma(alarma),
+          onCerrarConConfirmacion: () => _presenter.cerrarConConfirmacion(alarma), // ← NUEVO
         ),
       ),
     );

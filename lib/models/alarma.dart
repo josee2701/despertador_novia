@@ -24,6 +24,9 @@ class Alarma {
   /// Indica si la alarma fue pospuesta (snooze) y está esperando.
   bool pospuesta;
 
+  /// Indica si la alarma está pendiente de confirmación (cerró pero sonará a los 30s).
+  bool confirmacionPendiente;
+
   /// Días de la semana en que se repite (1=Lunes, 7=Domingo).
   /// Lista vacía = alarma de una sola vez.
   List<int> diasSemana;
@@ -34,6 +37,7 @@ class Alarma {
     required this.etiqueta,
     this.activa = true,
     this.pospuesta = false,
+    this.confirmacionPendiente = false,
     List<int>? diasSemana,
     int? horaDelDia,
     int? minutoDelDia,
@@ -50,6 +54,7 @@ class Alarma {
     'etiqueta': etiqueta,
     'activa': activa,
     'pospuesta': pospuesta,
+    'confirmacionPendiente': confirmacionPendiente,
     'diasSemana': diasSemana,
   };
 
@@ -70,6 +75,7 @@ class Alarma {
     );
     alarma.activa = json['activa'] as bool;
     alarma.pospuesta = (json['pospuesta'] as bool?) ?? false;
+    alarma.confirmacionPendiente = (json['confirmacionPendiente'] as bool?) ?? false;
     return alarma;
   }
 
@@ -80,6 +86,7 @@ class Alarma {
     String? etiqueta,
     bool? activa,
     bool? pospuesta,
+    bool? confirmacionPendiente,
     List<int>? diasSemana,
     int? horaDelDia,
     int? minutoDelDia,
@@ -90,6 +97,7 @@ class Alarma {
       etiqueta: etiqueta ?? this.etiqueta,
       activa: activa ?? this.activa,
       pospuesta: pospuesta ?? this.pospuesta,
+      confirmacionPendiente: confirmacionPendiente ?? this.confirmacionPendiente,
       diasSemana: diasSemana ?? List<int>.from(this.diasSemana),
       horaDelDia: horaDelDia ?? this.horaDelDia,
       minutoDelDia: minutoDelDia ?? this.minutoDelDia,
