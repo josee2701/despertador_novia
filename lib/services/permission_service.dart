@@ -35,6 +35,30 @@ class PermissionService {
     return _dndPlugin.isDndEnabled();
   }
 
+  /// Verifica si el permiso de notificaciones está concedido (Android 13+).
+  Future<bool> verificarPermisoNotificaciones() async {
+    if (!Platform.isAndroid) return true;
+    return Permission.notification.isGranted;
+  }
+
+  /// Solicita el permiso de notificaciones en tiempo de ejecución.
+  Future<void> solicitarPermisoNotificaciones() async {
+    if (Platform.isAndroid) {
+      await Permission.notification.request();
+    }
+  }
+
+  /// Solicita permisos y abre ajustes si fueron denegados permanentemente.
+  Future<void> verificarYSolicitarPermisoAlarmasExactas() async {
+    if (!Platform.isAndroid) return;
+    final status = await Permission.scheduleExactAlarm.status;
+    if (status.isPermanentlyDenied) {
+      await openAppSettings();
+    } else {
+      await Permission.scheduleExactAlarm.request();
+    }
+  }
+
   /// Abre la configuración del sistema para que el usuario cambie permisos.
   Future<void> abrirConfiguracion() async {
     await openAppSettings();

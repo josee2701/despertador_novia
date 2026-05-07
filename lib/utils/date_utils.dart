@@ -56,6 +56,7 @@ String? textoTiempoRestante(DateTime alarma, DateTime ahora) {
   final diff = alarma.difference(ahora);
   final horas = diff.inHours;
   final minutos = diff.inMinutes.remainder(60);
+  if (horas == 0 && minutos == 0) return 'menos de 1 min';
 
   return horas > 0 ? '${horas}h ${minutos}min' : '${minutos}min';
 }

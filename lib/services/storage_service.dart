@@ -32,8 +32,12 @@ class StorageService {
     final alarmas = <Alarma>[];
 
     for (final entrada in lista) {
-      final datos = jsonDecode(entrada) as Map<String, dynamic>;
-      alarmas.add(Alarma.fromJson(datos));
+      try {
+        final datos = jsonDecode(entrada) as Map<String, dynamic>;
+        alarmas.add(Alarma.fromJson(datos));
+      } catch (_) {
+        // Ignorar entradas corruptas individualmente
+      }
     }
 
     final nextId = prefs.getInt(claveNextId) ??

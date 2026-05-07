@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:alarm/alarm.dart';
 import 'package:alarm/utils/alarm_set.dart';
@@ -80,6 +81,7 @@ class AlarmasPresenter {
     await _alarmService.init();
     await _cargarAlarmas();
     await _verificarPermisoAlarmasExactas();
+    await _verificarPermisoNotificaciones();
     await _verificarModoNoMolestar();
     _iniciarTimer();
     _iniciarEscuchaRinging();
@@ -126,8 +128,9 @@ class AlarmasPresenter {
       _guardarAlarmas();
 
       final lifecycle = WidgetsBinding.instance.lifecycleState;
-      if (lifecycle == AppLifecycleState.resumed) {
-        // App en primer plano: mostrar banner inmediatamente.
+      if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
+        // App visible: mostrar banner no intrusivo; el fullscreen es para cuando
+        // el teléfono estaba bloqueado (lo maneja onAppResumed).
         _alertaEnPantalla = true;
         _view.onAlarmaSonandoEnForeground(alarma);
       }
@@ -148,6 +151,8 @@ class AlarmasPresenter {
     if (alarma.diasSemana.isNotEmpty) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       _alarmService.programar(alarma); // fire-and-forget, sin bloquear el stream
+    } else {
+      alarma.activa = false; // una sola vez: desactivar al pararse externamente
     }
 
     _guardarAlarmas();
@@ -159,7 +164,7 @@ class AlarmasPresenter {
     return Alarma(
       id: config.id,
       hora: config.dateTime,
-      etiqueta: config.notificationSettings.body,
+      etiqueta: 'Alarma',
     );
   }
 
@@ -169,9 +174,17 @@ class AlarmasPresenter {
     _view.onPermisoNecesario(!concedido);
   }
 
+  /// Verifica el permiso de notificaciones en Android 13+.
+  Future<void> _verificarPermisoNotificaciones() async {
+    final concedido = await _permissionService.verificarPermisoNotificaciones();
+    if (!concedido && Platform.isAndroid) {
+      await _permissionService.solicitarPermisoNotificaciones();
+    }
+  }
+
   /// Solicita el permiso de alarmas exactas.
   Future<void> solicitarPermisoAlarmasExactas() async {
-    await _permissionService.solicitarPermisoAlarmasExactas();
+    await _permissionService.verificarYSolicitarPermisoAlarmasExactas();
     final concedido = await _permissionService.verificarPermisoAlarmasExactas();
     _view.onPermisoNecesario(!concedido);
   }
@@ -189,10 +202,19 @@ class AlarmasPresenter {
   Future<void> onAppResumed() async {
     await _verificarModoNoMolestar();
 
+    // Si _alarmaSonando no se asignó aún (race condition con el stream),
+    // buscar activamente si alguna alarma está sonando.
+    if (_alarmaSonando == null) {
+      for (final alarma in _alarmas) {
+        if (alarma.activa && await _alarmService.alarmIsRinging(alarma.id)) {
+          _alarmaSonando = alarma;
+          break;
+        }
+      }
+    }
+
     if (_alarmaSonando == null) return;
 
-    // Verificar si la alarma sigue sonando: pudo detenerse desde la notificación
-    // del sistema mientras la app estaba en background.
     final sigueSonando = await _alarmService.alarmIsRinging(_alarmaSonando!.id);
 
     if (!sigueSonando) {
@@ -205,6 +227,8 @@ class AlarmasPresenter {
       if (alarma.diasSemana.isNotEmpty) {
         alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
         await _alarmService.programar(alarma);
+      } else {
+        alarma.activa = false; // una sola vez: desactivar si se paró desde la notificación
       }
 
       await _guardarAlarmas();
@@ -223,17 +247,31 @@ class AlarmasPresenter {
   ///
   /// Si encuentra alarmas vencidas (incluyendo snoozes expirados), recalcula
   /// su próxima fecha de disparo usando horaDelDia/minutoDelDia.
+  /// Limpia alarmas nativas huérfanas que no están en SharedPreferences.
   Future<void> _cargarAlarmas() async {
     final resultado = await _storageService.cargarAlarmas();
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
+
+    // Limpiar alarmas nativas huérfanas (no están en nuestra lista activa)
+    final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
+    final alarmasNativas = await _alarmService.getAlarmasNativas();
+    for (final nativa in alarmasNativas) {
+      if (!idsActivas.contains(nativa.id)) {
+        await _alarmService.detener(nativa.id);
+      }
+    }
 
     final ahora = DateTime.now();
     var huboCambios = false;
 
     for (final alarma in _alarmas) {
       if (alarma.activa && alarma.hora.isBefore(ahora)) {
-        alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+        if (alarma.diasSemana.isEmpty) {
+          alarma.activa = false;
+        } else {
+          alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+        }
         alarma.pospuesta = false;
         huboCambios = true;
       }
@@ -275,6 +313,8 @@ class AlarmasPresenter {
   /// Activa o desactiva una alarma existente.
   Future<void> toggleAlarma(Alarma alarma, bool activa) async {
     if (activa) {
+      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+      alarma.pospuesta = false;
       await _alarmService.programar(alarma);
     } else {
       await _alarmService.detener(alarma.id);
@@ -296,6 +336,8 @@ class AlarmasPresenter {
   Future<void> restaurarAlarma(Alarma alarma) async {
     _alarmas.add(alarma);
     if (alarma.activa) {
+      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+      alarma.pospuesta = false;
       await _alarmService.programar(alarma);
     }
     await _guardarAlarmas();
@@ -395,7 +437,7 @@ class AlarmasPresenter {
 
   /// Posponer una alarma activa por 5 minutos.
   Future<void> posponerAlarma(Alarma alarma) async {
-    // alarma.hora se usa para programar el snooze; horaDelDia/minutoDelDia no cambian.
+    await _alarmService.detener(alarma.id);
     alarma.hora = DateTime.now().add(const Duration(minutes: 5));
     alarma.pospuesta = true;
     await _alarmService.programar(alarma);
@@ -414,6 +456,8 @@ class AlarmasPresenter {
       // Usar horaDelDia/minutoDelDia: alarma.hora puede contener la hora del snooze.
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       await _alarmService.programar(alarma);
+    } else {
+      alarma.activa = false; // una sola vez: desactivar al apagar
     }
 
     await _guardarAlarmas();

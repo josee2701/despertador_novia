@@ -35,7 +35,9 @@ class AlarmService {
       ),
       notificationSettings: NotificationSettings(
         title: 'Mi Despertador',
-        body: '${alarma.etiqueta} — $horaTexto',
+        body: alarma.pospuesta
+            ? '${alarma.etiqueta} — Pospuesta (${formatearHoraAMPM(alarma.hora)})'
+            : '${alarma.etiqueta} — $horaTexto',
         stopButton: 'Detener',
       ),
       loopAudio: true,
@@ -59,6 +61,9 @@ class AlarmService {
 
   /// Devuelve true si la alarma con ese ID está sonando en este momento.
   Future<bool> alarmIsRinging(int id) => Alarm.isRinging(id);
+
+  /// Devuelve todas las alarmas actualmente programadas en el paquete nativo.
+  Future<List<AlarmSettings>> getAlarmasNativas() => Alarm.getAlarms();
 
   /// Escucha el stream de alarmas que están sonando actualmente.
   Stream<AlarmSet> get ringingStream => Alarm.ringing;

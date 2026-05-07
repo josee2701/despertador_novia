@@ -123,6 +123,18 @@ void main() {
       final alarma = DateTime(2026, 5, 4, 10, 0);
       expect(utils.textoTiempoRestante(alarma, ahora), isNull);
     });
+
+    test('menos de 1 min cuando quedan menos de 60 segundos', () {
+      final ahora = DateTime(2026, 5, 4, 10, 0, 0);
+      final alarma = DateTime(2026, 5, 4, 10, 0, 45);
+      expect(utils.textoTiempoRestante(alarma, ahora), 'menos de 1 min');
+    });
+
+    test('varias horas sin minutos muestra Xh 0min', () {
+      final ahora = DateTime(2026, 5, 4, 10, 0);
+      final alarma = DateTime(2026, 5, 4, 13, 0);
+      expect(utils.textoTiempoRestante(alarma, ahora), '3h 0min');
+    });
   });
 
   group('direccionAleatoria', () {

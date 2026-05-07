@@ -239,7 +239,12 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   Widget build(BuildContext context) {
-    final alarmas = [..._presenter.alarmas]..sort((a, b) => a.hora.compareTo(b.hora));
+    final alarmas = [..._presenter.alarmas]..sort((a, b) {
+      if (a.activa != b.activa) return a.activa ? -1 : 1;
+      final horaA = a.horaDelDia * 60 + a.minutoDelDia;
+      final horaB = b.horaDelDia * 60 + b.minutoDelDia;
+      return horaA.compareTo(horaB);
+    });
     final proximaTexto = _presenter.obtenerTextoProximaAlarma();
     final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
 
