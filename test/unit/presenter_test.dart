@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:alarm/alarm.dart';
 import 'package:alarm/utils/alarm_set.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +18,8 @@ class FakeAlarmService extends AlarmService {
   final List<int> detenidas = [];
   final Set<int> sonandoIds = {};
   List<AlarmSettings> alarmasNativas = [];
+
+  final StreamController<AlarmSet> ringingController = StreamController<AlarmSet>.broadcast();
 
   @override
   Future<void> init() async {}
@@ -39,7 +43,7 @@ class FakeAlarmService extends AlarmService {
   Future<List<AlarmSettings>> getAlarmasNativas() async => alarmasNativas;
 
   @override
-  Stream<AlarmSet> get ringingStream => const Stream.empty();
+  Stream<AlarmSet> get ringingStream => ringingController.stream;
 }
 
 class FakeStorageService extends StorageService {
@@ -132,6 +136,19 @@ Alarma _alarmaSimple({
   );
 }
 
+AlarmSettings _settingsDummy(int id) {
+  return AlarmSettings(
+    id: id,
+    dateTime: DateTime.now(),
+    volumeSettings: const VolumeSettings.fixed(volume: 1.0, volumeEnforced: true),
+    notificationSettings: const NotificationSettings(
+      title: 'Test',
+      body: 'Test',
+      stopButton: 'Stop',
+    ),
+  );
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
@@ -148,7 +165,10 @@ void main() {
     storage = FakeStorageService();
   });
 
-  tearDown(() => presenter.dispose());
+  tearDown(() {
+    presenter.dispose();
+    alarm.ringingController.close();
+  });
 
   // Crea el presenter, llama iniciar() y lo registra para dispose en tearDown.
   Future<void> arrancar({List<Alarma> alarmas = const []}) async {
@@ -586,6 +606,27 @@ void main() {
       expect(presenter.alarmas.first.confirmacionPendiente, isFalse);
       expect(presenter.alarmas.first.activa, isFalse,
           reason: 'No debe generarse un tercer disparo');
+    });
+
+    test('stream "alarm stopped" durante cerrarConConfirmacion no resetea confirmacionPendiente', () async {
+      final a = _alarmaSimple(id: 1, diasSemana: []);
+      await arrancar(alarmas: [a]);
+      alarm.sonandoIds.add(1); // simular que suena
+
+      // Disparar el primer ring
+      alarm.ringingController.add(AlarmSet([_settingsDummy(1)]));
+      await Future.delayed(Duration.zero); // Permitir que el stream se procese
+
+      // Usuario desliza → cerrarConConfirmacion
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+      expect(presenter.alarmas.first.confirmacionPendiente, isTrue);
+
+      // Simular que el stream emite "stopped" mientras cerrarConConfirmacion aún está en su ventana de 500ms
+      alarm.ringingController.add(AlarmSet.empty());
+      await Future.delayed(const Duration(milliseconds: 600)); // Esperar a que el Future.delayed de _idsEnDetencion.remove() termine
+
+      expect(presenter.alarmas.first.confirmacionPendiente, isTrue,
+          reason: 'El cleanup no debe limpiar confirmacionPendiente durante una detención iniciada por el usuario');
     });
   });
 

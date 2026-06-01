@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/alarma.dart';
+import '../utils/date_utils.dart';
 import '../widgets/slide_desbloqueo.dart';
 
 /// Pantalla de pantalla completa que se muestra cuando una alarma está sonando.
@@ -129,9 +130,11 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
   @override
   Widget build(BuildContext context) {
-    final horas = _ahora.hour.toString().padLeft(2, '0');
-    final minutos = _ahora.minute.toString().padLeft(2, '0');
+    final partes = partesHora12h(_ahora);
+    final horas = partes.hora.toString();
+    final minutos = partes.minuto.toString().padLeft(2, '0');
     final segundos = _ahora.second.toString().padLeft(2, '0');
+    final periodo = partes.periodo;
 
     return PopScope(
       canPop: false,
@@ -231,6 +234,15 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                           fontSize: 28,
                           fontWeight: FontWeight.w200,
                           fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        periodo,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 22,
+                          fontWeight: FontWeight.w300,
                         ),
                       ),
                     ],

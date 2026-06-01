@@ -441,7 +441,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.all(16.0),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                     itemCount: alarmas.length,
                     itemBuilder: (context, index) {
                       final alarma = alarmas[index];
