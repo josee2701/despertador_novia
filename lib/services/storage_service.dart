@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/alarma.dart';
@@ -35,8 +36,8 @@ class StorageService {
       try {
         final datos = jsonDecode(entrada) as Map<String, dynamic>;
         alarmas.add(Alarma.fromJson(datos));
-      } catch (_) {
-        // Ignorar entradas corruptas individualmente
+      } catch (e) {
+        debugPrint('StorageService: alarma corrupta ignorada: $e');
       }
     }
 

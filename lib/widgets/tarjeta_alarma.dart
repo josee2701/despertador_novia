@@ -231,8 +231,13 @@ class TarjetaAlarma extends StatelessWidget {
   /// Verifica si la alarma está programada para hoy.
   bool _esParaHoy() {
     final ahora = DateTime.now();
-    return alarma.hora.year == ahora.year &&
-        alarma.hora.month == ahora.month &&
-        alarma.hora.day == ahora.day;
+    final proximoDisparo = proximaFecha(
+      alarma.horaDelDia,
+      alarma.minutoDelDia,
+      alarma.diasSemana,
+    );
+    return proximoDisparo.year == ahora.year &&
+        proximoDisparo.month == ahora.month &&
+        proximoDisparo.day == ahora.day;
   }
 }

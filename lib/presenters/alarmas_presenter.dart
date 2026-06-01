@@ -113,7 +113,7 @@ class AlarmasPresenter {
     if (_alarmaSonando != null &&
         _prevAlarmSet.containsId(_alarmaSonando!.id) &&
         !conjunto.containsId(_alarmaSonando!.id)) {
-      _limpiarAlarmaSonandoExterna(_alarmaSonando!);
+      unawaited(_limpiarAlarmaSonandoExterna(_alarmaSonando!));
     }
 
     // Procesar alarmas que empezaron a sonar desde el último evento.
@@ -131,7 +131,6 @@ class AlarmasPresenter {
       if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
         // App visible: mostrar banner no intrusivo; el fullscreen es para cuando
         // el teléfono estaba bloqueado (lo maneja onAppResumed).
-        _alertaEnPantalla = true;
         _view.onAlarmaSonandoEnForeground(alarma);
       }
       // App en segundo plano: NO hacer push de ruta ahora.
@@ -143,20 +142,20 @@ class AlarmasPresenter {
 
   /// Limpia el estado cuando la alarma se detuvo fuera del control de la app
   /// (OS, notificación del sistema, etc.) y reprograma si es recurrente.
-  void _limpiarAlarmaSonandoExterna(Alarma alarma) {
+  Future<void> _limpiarAlarmaSonandoExterna(Alarma alarma) async {
     alarma.pospuesta = false;
-    alarma.confirmacionPendiente = false; // ← NUEVO: limpiar si se paró externamente
+    alarma.confirmacionPendiente = false;
     _alarmaSonando = null;
     _alertaEnPantalla = false;
 
     if (alarma.diasSemana.isNotEmpty) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
-      _alarmService.programar(alarma); // fire-and-forget, sin bloquear el stream
+      await _alarmService.programar(alarma);
     } else {
-      alarma.activa = false; // una sola vez: desactivar al pararse externamente
+      alarma.activa = false;
     }
 
-    _guardarAlarmas();
+    await _guardarAlarmas();
     _view.onAlarmaActualizada();
   }
 

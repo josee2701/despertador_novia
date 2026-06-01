@@ -46,7 +46,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   int _countdownSegundos = 5;
   Timer? _countdownTimer;
 
-  String _direccionTexto = 'desliza →';
+  String _direccionTexto = '';
 
   @override
   void initState() {
@@ -104,7 +104,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     if (!mounted) return;
     setState(() {
       _desbloqueado = true;
-      _countdownSegundos = 5;
+      _countdownSegundos = _kDuracionCountdown;
     });
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -322,6 +322,8 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   }
 }
 
+const int _kDuracionCountdown = 5;
+
 class _CountdownWidget extends StatelessWidget {
   final int segundos;
   final bool esConfirmacion; // ← NUEVO
@@ -351,7 +353,7 @@ class _CountdownWidget extends StatelessWidget {
               width: 72,
               height: 72,
               child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 1.0, end: segundos / 5.0),
+                tween: Tween(begin: 1.0, end: segundos / _kDuracionCountdown.toDouble()),
                 duration: const Duration(milliseconds: 300),
                 builder: (context, value, _) {
                   return CircularProgressIndicator(

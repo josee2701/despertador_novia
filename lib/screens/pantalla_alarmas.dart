@@ -35,7 +35,9 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _presenter = AlarmasPresenter(view: this);
-    _presenter.iniciar();
+    _presenter.iniciar().catchError((Object e, StackTrace s) {
+      debugPrint('Error al iniciar presenter: $e');
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final alarmas = _presenter.alarmas;
