@@ -105,5 +105,5 @@ class Alarma {
   }
 
   @override
-  String toString() => 'Alarma(id: $id, hora: $hora, etiqueta: $etiqueta, activa: $activa)';
+  String toString() => 'Alarma(id: $id, hora: $hora, etiqueta: $etiqueta, activa: $activa, confirmacionPendiente: $confirmacionPendiente)';
 }

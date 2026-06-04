@@ -71,6 +71,38 @@ void main() {
     });
   });
 
+  group('partesHora12h', () {
+    test('medianoche exacta', () {
+      expect(utils.partesHora12h(DateTime(2026, 1, 1, 0, 0)),
+          (hora: 12, minuto: 0, periodo: 'AM'));
+    });
+
+    test('mediodía exacto', () {
+      expect(utils.partesHora12h(DateTime(2026, 1, 1, 12, 0)),
+          (hora: 12, minuto: 0, periodo: 'PM'));
+    });
+
+    test('mañana con minutos', () {
+      expect(utils.partesHora12h(DateTime(2026, 1, 1, 7, 5)),
+          (hora: 7, minuto: 5, periodo: 'AM'));
+    });
+
+    test('tarde con minutos', () {
+      expect(utils.partesHora12h(DateTime(2026, 1, 1, 14, 30)),
+          (hora: 2, minuto: 30, periodo: 'PM'));
+    });
+
+    test('noche', () {
+      expect(utils.partesHora12h(DateTime(2026, 1, 1, 23, 59)),
+          (hora: 11, minuto: 59, periodo: 'PM'));
+    });
+
+    test('11:59 AM', () {
+      expect(utils.partesHora12h(DateTime(2026, 1, 1, 11, 59)),
+          (hora: 11, minuto: 59, periodo: 'AM'));
+    });
+  });
+
   group('iconoSegunHora', () {
     test('mañana (5-12)', () {
       expect(utils.iconoSegunHora(7), Icons.wb_sunny_outlined);

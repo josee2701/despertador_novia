@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/alarma.dart';
+import '../utils/date_utils.dart';
 import '../widgets/slide_desbloqueo.dart';
 
 /// Pantalla de pantalla completa que se muestra cuando una alarma está sonando.
@@ -46,7 +47,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   int _countdownSegundos = 5;
   Timer? _countdownTimer;
 
-  String _direccionTexto = 'desliza →';
+  String _direccionTexto = '';
 
   @override
   void initState() {
@@ -104,7 +105,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     if (!mounted) return;
     setState(() {
       _desbloqueado = true;
-      _countdownSegundos = 5;
+      _countdownSegundos = _kDuracionCountdown;
     });
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -129,9 +130,11 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
   @override
   Widget build(BuildContext context) {
-    final horas = _ahora.hour.toString().padLeft(2, '0');
-    final minutos = _ahora.minute.toString().padLeft(2, '0');
+    final partes = partesHora12h(_ahora);
+    final horas = partes.hora.toString();
+    final minutos = partes.minuto.toString().padLeft(2, '0');
     final segundos = _ahora.second.toString().padLeft(2, '0');
+    final periodo = partes.periodo;
 
     return PopScope(
       canPop: false,
@@ -233,6 +236,15 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                           fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      Text(
+                        periodo,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 22,
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -322,6 +334,8 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
   }
 }
 
+const int _kDuracionCountdown = 5;
+
 class _CountdownWidget extends StatelessWidget {
   final int segundos;
   final bool esConfirmacion; // ← NUEVO
@@ -351,7 +365,7 @@ class _CountdownWidget extends StatelessWidget {
               width: 72,
               height: 72,
               child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 1.0, end: segundos / 5.0),
+                tween: Tween(begin: 1.0, end: segundos / _kDuracionCountdown.toDouble()),
                 duration: const Duration(milliseconds: 300),
                 builder: (context, value, _) {
                   return CircularProgressIndicator(

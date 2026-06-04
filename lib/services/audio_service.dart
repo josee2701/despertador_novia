@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../utils/constantes.dart';
@@ -15,10 +16,14 @@ import '../utils/constantes.dart';
 class AudioService {
   /// Genera el archivo WAV si no existe ya en el sistema.
   Future<void> prepararSonido() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final archivo = File('${dir.path}/$archivoSonido');
-    if (!archivo.existsSync()) {
-      await archivo.writeAsBytes(_generarWavBarrido());
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final archivo = File('${dir.path}/$archivoSonido');
+      if (!archivo.existsSync()) {
+        await archivo.writeAsBytes(_generarWavBarrido());
+      }
+    } catch (e) {
+      debugPrint('AudioService: no se pudo generar el audio de alarma: $e');
     }
   }
 

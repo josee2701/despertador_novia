@@ -61,6 +61,9 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
       _diasSeleccionados = [];
     }
     _controladorEtiqueta.text = _etiqueta;
+    if (_esEdicion && widget.alarma!.diasSemana.isNotEmpty) {
+      _modoConfiguracion = true;
+    }
   }
 
   @override

@@ -29,6 +29,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
     with TickerProviderStateMixin {
   late Offset _direccionObjetivo;
   Offset _arrastre = Offset.zero;
+  Offset _arrastreInicial = Offset.zero;
   bool _completado = false;
   late AnimationController _animacionReset;
   double _anchoDisponible = 0.0;
@@ -44,7 +45,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
     )..addListener(() {
         if (_animacionReset.isAnimating) {
           setState(() {
-            _arrastre = _arrastre * (1.0 - _animacionReset.value);
+            _arrastre = _arrastreInicial * (1.0 - _animacionReset.value);
           });
         }
       });
@@ -96,6 +97,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
         HapticFeedback.mediumImpact();
       }
 
+      _arrastreInicial = _arrastre;
       _animacionReset.forward(from: 0.0);
     }
   }

@@ -35,6 +35,16 @@ String formatearHoraAMPM(DateTime dt) {
   return '$h:$m $periodo';
 }
 
+/// Devuelve la hora en formato 12h desglosada en partes: hora (1-12), minutos (0-59) y periodo ('AM'/'PM').
+({int hora, int minuto, String periodo}) partesHora12h(DateTime dt) {
+  final hora = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  return (
+    hora: hora,
+    minuto: dt.minute,
+    periodo: dt.hour < 12 ? 'AM' : 'PM',
+  );
+}
+
 /// Devuelve el ícono de alarma según la hora del día.
 IconData iconoSegunHora(int hora) {
   if (hora >= 5 && hora < 12) return Icons.wb_sunny_outlined;
