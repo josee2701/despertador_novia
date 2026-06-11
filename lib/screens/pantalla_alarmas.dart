@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
 import '../screens/pantalla_alarma_activa.dart';
+import '../widgets/banner_ad_widget.dart';
 import '../widgets/dialogo_alarma.dart';
 import '../widgets/tarjeta_alarma.dart';
 
@@ -432,6 +435,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                         const SizedBox(height: 8),
                         Text(
                           'Toca el botón azul para crear tu primera alarma',
+                          textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 15,
                             color: Colors.grey[500],
@@ -473,6 +477,13 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     },
                   ),
           ),
+
+          // ── Banner publicitario (solo móvil) ──
+          if (Platform.isAndroid || Platform.isIOS)
+            const SafeArea(
+              top: false,
+              child: BannerAdWidget(),
+            ),
         ],
       ),
       floatingActionButton: _animarFAB && alarmas.isEmpty
