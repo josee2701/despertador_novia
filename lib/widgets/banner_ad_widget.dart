@@ -15,11 +15,17 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
   bool _anuncioCargado = false;
   bool _fallido = false;
 
-  // IDs de prueba — cambiar a los reales cuando AdMob apruebe la cuenta:
-  // Android real: ca-app-pub-6637517205793062/5967511694
-  static String get _adUnitId => Platform.isAndroid
-      ? 'ca-app-pub-3940256099942544/6300978111'
-      : 'ca-app-pub-3940256099942544/2934735716';
+  static String get _adUnitId {
+    if (kDebugMode) {
+      return Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/6300978111'
+          : 'ca-app-pub-3940256099942544/2934735716';
+    }
+    // IDs de producción — reemplazar iOS con el aprobado por AdMob.
+    return Platform.isAndroid
+        ? 'ca-app-pub-6637517205793062/5967511694'
+        : 'ca-app-pub-3940256099942544/2934735716';
+  }
 
   static const double _alturaBanner = 50;
 

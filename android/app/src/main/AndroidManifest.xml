@@ -13,9 +13,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Necesario para excluir la app de optimizaciones de batería (Xiaomi, Huawei, Samsung) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-    <!-- Necesario para mostrar la ventana de alarma sobre otras apps -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-
     <application
         android:label="Bella Durmiente"
         android:name="${applicationName}"

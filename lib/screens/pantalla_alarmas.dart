@@ -1,7 +1,10 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
@@ -61,6 +64,8 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _presenter.onAppResumed();
+    } else if (state == AppLifecycleState.paused) {
+      _mostrarInterstitialSiCorresponde();
     }
   }
 
@@ -237,6 +242,36 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
             child: const Text('Ir a Configuración'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Muestra un interstitial al minimizar la app, máximo una vez por día.
+  Future<void> _mostrarInterstitialSiCorresponde() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    // Nunca mostrar publicidad si hay una alarma activa.
+    if (_presenter.hayAlarmaSonando || _alarmaRinging != null) return;
+
+    const String adUnitIdProd = 'ca-app-pub-6637517205793062/PENDIENTE';
+    // Bloquear en producción mientras el ID no esté configurado.
+    if (!kDebugMode && adUnitIdProd.contains('PENDIENTE')) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final hoy = DateTime.now().toIso8601String().substring(0, 10);
+    if (prefs.getString('ultimo_interstitial') == hoy) return;
+    // Registrar el intento antes de cargar para evitar requests múltiples
+    // si el ad falla o si el usuario pausa la app varias veces seguidas.
+    await prefs.setString('ultimo_interstitial', hoy);
+
+    InterstitialAd.load(
+      adUnitId: kDebugMode
+          ? 'ca-app-pub-3940256099942544/1033173712'
+          : adUnitIdProd,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) => ad.show(),
+        onAdFailedToLoad: (error) =>
+            debugPrint('Interstitial AdMob error: ${error.message}'),
       ),
     );
   }
@@ -477,8 +512,8 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                   ),
           ),
 
-          // ── Banner publicitario al fondo (solo en móvil) ──
-          if (Platform.isAndroid || Platform.isIOS)
+          // ── Banner publicitario al fondo (solo en móvil, nunca durante alarma) ──
+          if ((Platform.isAndroid || Platform.isIOS) && _alarmaRinging == null)
             const Center(child: BannerAdWidget()),
         ],
       ),

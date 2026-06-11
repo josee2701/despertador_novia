@@ -133,6 +133,13 @@ class AlarmasPresenter {
     for (final configuracion in conjunto.alarms) {
       if (_prevAlarmSet.containsId(configuracion.id)) continue;
 
+      // Filtrar recordatorios: son silenciosos y no deben mostrar pantalla de alarma.
+      // El package los detiene automáticamente (loopAudio: false); solo los limpiamos.
+      if (AlarmService.esIdRecordatorio(configuracion.id)) {
+        unawaited(_alarmService.detener(configuracion.id));
+        continue;
+      }
+
       final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull
           ?? _alarmaDesdeConfig(configuracion);
 
@@ -161,9 +168,14 @@ class AlarmasPresenter {
     _alarmaSonando = null;
     _alertaEnPantalla = false;
 
+    // Cancelar el recordatorio del ciclo actual en cualquier caso.
+    await _alarmService.cancelarRecordatorio(alarma.id);
+
     if (alarma.diasSemana.isNotEmpty) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       await _alarmService.programar(alarma);
+      // Programar recordatorio para el próximo disparo recurrente.
+      await _alarmService.programarRecordatorio(alarma);
     } else {
       alarma.activa = false;
     }
@@ -236,11 +248,16 @@ class AlarmasPresenter {
       _alarmaSonando = null;
       _alertaEnPantalla = false;
       alarma.pospuesta = false;
-      alarma.confirmacionPendiente = false; // ← NUEVO: limpiar si se paró externamente
+      alarma.confirmacionPendiente = false;
+
+      // Cancelar el recordatorio del ciclo actual.
+      await _alarmService.cancelarRecordatorio(alarma.id);
 
       if (alarma.diasSemana.isNotEmpty) {
         alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
         await _alarmService.programar(alarma);
+        // Programar recordatorio para el próximo disparo recurrente.
+        await _alarmService.programarRecordatorio(alarma);
       } else {
         alarma.activa = false; // una sola vez: desactivar si se paró desde la notificación
       }
@@ -267,10 +284,13 @@ class AlarmasPresenter {
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
 
-    // Limpiar alarmas nativas huérfanas (no están en nuestra lista activa)
+    // Limpiar alarmas nativas huérfanas (no están en nuestra lista activa).
+    // Se excluyen los recordatorios (id > offsetRecordatorio): se gestionan
+    // por separado y se reprograman más abajo junto con sus alarmas.
     final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
     final alarmasNativas = await _alarmService.getAlarmasNativas();
     for (final nativa in alarmasNativas) {
+      if (AlarmService.esIdRecordatorio(nativa.id)) continue;
       if (!idsActivas.contains(nativa.id)) {
         await _alarmService.detener(nativa.id);
       }
@@ -294,6 +314,8 @@ class AlarmasPresenter {
 
       if (alarma.activa && alarma.hora.isAfter(ahora)) {
         await _alarmService.programar(alarma);
+        // Reprogramar recordatorio si quedan más de 30 minutos.
+        await _alarmService.programarRecordatorio(alarma);
       }
     }
 
@@ -321,6 +343,7 @@ class AlarmasPresenter {
     );
 
     await _alarmService.programar(nuevaAlarma);
+    await _alarmService.programarRecordatorio(nuevaAlarma);
     _alarmas.add(nuevaAlarma);
     await _guardarAlarmas();
     _view.onAlarmaAgregada();
@@ -332,8 +355,10 @@ class AlarmasPresenter {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       alarma.pospuesta = false;
       await _alarmService.programar(alarma);
+      await _alarmService.programarRecordatorio(alarma);
     } else {
       await _alarmService.detener(alarma.id);
+      await _alarmService.cancelarRecordatorio(alarma.id);
     }
     alarma.activa = activa;
     await _guardarAlarmas();
@@ -343,6 +368,7 @@ class AlarmasPresenter {
   /// Elimina una alarma del sistema y de la lista local.
   Future<void> eliminarAlarma(Alarma alarma) async {
     await _alarmService.detener(alarma.id);
+    await _alarmService.cancelarRecordatorio(alarma.id);
     _alarmas.remove(alarma);
     await _guardarAlarmas();
     _view.onAlarmaEliminada();
@@ -355,6 +381,7 @@ class AlarmasPresenter {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
       alarma.pospuesta = false;
       await _alarmService.programar(alarma);
+      await _alarmService.programarRecordatorio(alarma);
     }
     await _guardarAlarmas();
     _view.onAlarmaAgregada();
@@ -369,6 +396,9 @@ class AlarmasPresenter {
     alarma.hora = proximaFecha(nuevaHora, nuevoMinuto, alarma.diasSemana);
     if (alarma.activa) {
       await _alarmService.programar(alarma);
+      // Cancelar el recordatorio anterior y programar uno con la nueva hora.
+      await _alarmService.cancelarRecordatorio(alarma.id);
+      await _alarmService.programarRecordatorio(alarma);
     }
     await _guardarAlarmas();
     _view.onAlarmaActualizada();
@@ -379,6 +409,9 @@ class AlarmasPresenter {
     alarma.etiqueta = nuevaEtiqueta.trim().isEmpty ? 'Alarma' : nuevaEtiqueta.trim();
     if (alarma.activa) {
       await _alarmService.programar(alarma);
+      // Reprogramar el recordatorio para que muestre la etiqueta actualizada.
+      await _alarmService.cancelarRecordatorio(alarma.id);
+      await _alarmService.programarRecordatorio(alarma);
     }
     await _guardarAlarmas();
     _view.onAlarmaActualizada();
@@ -391,6 +424,9 @@ class AlarmasPresenter {
     if (alarma.activa) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, nuevosDias);
       await _alarmService.programar(alarma);
+      // Actualizar el recordatorio con la nueva próxima fecha de disparo.
+      await _alarmService.cancelarRecordatorio(alarma.id);
+      await _alarmService.programarRecordatorio(alarma);
     }
 
     await _guardarAlarmas();
@@ -425,6 +461,11 @@ class AlarmasPresenter {
 
     if (alarma.activa) {
       await _alarmService.programar(alarma);
+      // Actualizar el recordatorio si cambió cualquier dato que aparece en la notificación.
+      if ((nuevaHora != null && nuevoMinuto != null) || nuevosDias != null || nuevaEtiqueta != null) {
+        await _alarmService.cancelarRecordatorio(alarma.id);
+        await _alarmService.programarRecordatorio(alarma);
+      }
     }
     await _guardarAlarmas();
     _view.onAlarmaActualizada();
@@ -456,6 +497,8 @@ class AlarmasPresenter {
     _idsEnDetencion.add(alarma.id);
     try {
       await _alarmService.detener(alarma.id);
+      // Cancelar el recordatorio: el snooze tiene hora temporal y no aplica recordatorio.
+      await _alarmService.cancelarRecordatorio(alarma.id);
       alarma.hora = DateTime.now().add(const Duration(minutes: 5));
       alarma.pospuesta = true;
       await _alarmService.programar(alarma);
@@ -475,6 +518,8 @@ class AlarmasPresenter {
     _idsEnDetencion.add(alarma.id);
     try {
       await _alarmService.detener(alarma.id);
+      // Cancelar siempre el recordatorio del ciclo actual.
+      await _alarmService.cancelarRecordatorio(alarma.id);
       alarma.pospuesta = false;
       alarma.confirmacionPendiente = false;
 
@@ -483,6 +528,8 @@ class AlarmasPresenter {
         // Usar horaDelDia/minutoDelDia: alarma.hora puede contener la hora del snooze/confirmación.
         alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
         await _alarmService.programar(alarma);
+        // Programar recordatorio para el próximo disparo.
+        await _alarmService.programarRecordatorio(alarma);
       } else {
         // Una sola vez: desactivar definitivamente.
         alarma.activa = false;
@@ -506,6 +553,9 @@ class AlarmasPresenter {
     try {
       // Detener el audio actual antes de reprogramar (igual que posponerAlarma).
       await _alarmService.detener(alarma.id);
+      // El recordatorio ya disparó antes de que la alarma sonara (invariante: se programa
+      // 30 min antes), pero se cancela defensivamente por consistencia con otros métodos.
+      await _alarmService.cancelarRecordatorio(alarma.id);
       alarma.confirmacionPendiente = true;
       alarma.pospuesta = false;
 
