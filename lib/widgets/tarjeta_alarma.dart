@@ -211,13 +211,10 @@ class TarjetaAlarma extends StatelessWidget {
                   ),
 
                   // Switch de activación
-                  Transform.scale(
-                    scale: 0.85,
-                    child: Switch(
-                      value: alarma.activa,
-                      onChanged: onToggle,
-                      activeTrackColor: Theme.of(context).colorScheme.primary,
-                    ),
+                  Switch(
+                    value: alarma.activa,
+                    onChanged: onToggle,
+                    activeTrackColor: Theme.of(context).colorScheme.primary,
                   ),
                 ],
               ),

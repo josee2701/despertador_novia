@@ -92,9 +92,9 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
       widget.onDesbloqueado();
     } else {
       final direccionCorrecta = _estaEnDireccionCorrecta();
-      if (!direccionCorrecta && _arrastre.distance > 20) {
+      if (!direccionCorrecta && _arrastre.distance > 40) {
         _cambiarDireccion();
-        HapticFeedback.mediumImpact();
+        HapticFeedback.heavyImpact();
       }
 
       _arrastreInicial = _arrastre;

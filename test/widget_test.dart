@@ -17,7 +17,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('No tienes alarmas'), findsOneWidget);
-      expect(find.text('Toca + para crear tu primera alarma'), findsOneWidget);
+      expect(find.text('Toca el botón azul para crear tu primera alarma'), findsOneWidget);
     });
 
     testWidgets('Muestra botón de agregar alarma', (WidgetTester tester) async {

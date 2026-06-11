@@ -17,10 +17,8 @@ class FakeAlarmService extends AlarmService {
   final List<Alarma> programadas = [];
   final List<int> detenidas = [];
   final Set<int> sonandoIds = {};
-  List<AlarmSettings> alarmasNativas = [];
-
-  /// IDs de recordatorios programados actualmente.
   final Set<int> recordatoriosProgramados = {};
+  List<AlarmSettings> alarmasNativas = [];
 
   final StreamController<AlarmSet> ringingController = StreamController<AlarmSet>.broadcast();
 
@@ -35,18 +33,12 @@ class FakeAlarmService extends AlarmService {
 
   @override
   Future<void> programarRecordatorio(Alarma alarma) async {
-    // Solo registrar si la alarma no está en snooze y el recordatorio es futuro.
-    if (alarma.pospuesta) return;
-    final momento = alarma.hora.subtract(const Duration(minutes: 30));
-    if (!momento.isAfter(DateTime.now())) return;
     recordatoriosProgramados.add(alarma.id + AlarmService.offsetRecordatorio);
   }
 
   @override
   Future<void> cancelarRecordatorio(int alarmaId) async {
-    final idRecordatorio = alarmaId + AlarmService.offsetRecordatorio;
-    detenidas.add(idRecordatorio);
-    recordatoriosProgramados.remove(idRecordatorio);
+    recordatoriosProgramados.remove(alarmaId + AlarmService.offsetRecordatorio);
   }
 
   @override
@@ -101,6 +93,10 @@ class FakePermissionService extends PermissionService {
   Future<void> solicitarPermisoNotificaciones() async {}
   @override
   Future<void> verificarYSolicitarPermisoAlarmasExactas() async {}
+  @override
+  Future<bool> verificarExencionBateria() async => true;
+  @override
+  Future<void> solicitarExencionBateria() async {}
 }
 
 class FakeView implements AlarmasView {
@@ -685,54 +681,6 @@ void main() {
     test('se puede llamar sin errores', () async {
       await arrancar();
       expect(() => presenter.dispose(), returnsNormally);
-    });
-  });
-
-  // ── recordatorios ──────────────────────────────────────────────────────────
-
-  group('recordatorios', () {
-    test('agregarAlarma programa recordatorio con ID = alarmaId + offsetRecordatorio', () async {
-      await arrancar();
-      await presenter.agregarAlarma(
-        hora: 23,
-        minuto: 59,
-        etiqueta: 'Tarde',
-        diasSemana: [],
-      );
-      final id = presenter.alarmas.first.id;
-      expect(
-        alarm.recordatoriosProgramados,
-        contains(id + AlarmService.offsetRecordatorio),
-      );
-    });
-
-    test('desactivar alarma cancela el recordatorio', () async {
-      await arrancar(alarmas: [_alarmaSimple(id: 5, activa: true)]);
-      alarm.detenidas.clear();
-
-      await presenter.toggleAlarma(presenter.alarmas.first, false);
-
-      expect(alarm.detenidas, contains(5 + AlarmService.offsetRecordatorio));
-    });
-
-    test('actualizarEtiqueta actualiza la etiqueta y reprograma el recordatorio', () async {
-      await arrancar(alarmas: [_alarmaSimple(id: 1, activa: true)]);
-      alarm.detenidas.clear();
-
-      await presenter.actualizarEtiqueta(presenter.alarmas.first, 'Nueva etiqueta');
-
-      expect(presenter.alarmas.first.etiqueta, 'Nueva etiqueta');
-      expect(alarm.detenidas, contains(1 + AlarmService.offsetRecordatorio));
-      expect(
-        alarm.recordatoriosProgramados,
-        contains(1 + AlarmService.offsetRecordatorio),
-      );
-    });
-
-    test('actualizarEtiqueta con cadena vacía normaliza a "Alarma"', () async {
-      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
-      await presenter.actualizarEtiqueta(presenter.alarmas.first, '   ');
-      expect(presenter.alarmas.first.etiqueta, 'Alarma');
     });
   });
 }

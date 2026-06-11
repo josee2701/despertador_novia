@@ -394,16 +394,15 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
               // Botón "Configurar" (solo en modo simple)
               if (!_modoConfiguracion) ...[
                 const SizedBox(height: 10),
-                Center(
-                  child: TextButton.icon(
-                    onPressed: () {
-                      setState(() => _modoConfiguracion = true);
-                      HapticFeedback.lightImpact();
-                    },
-                    icon: const Icon(Icons.settings_outlined, size: 18),
-                    label: const Text('Configurar repetición y nombre'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.primary,
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => setState(() => _modoConfiguracion = true),
+                    icon: const Icon(Icons.tune, size: 18),
+                    label: const Text('Repetición y nombre'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -456,8 +455,8 @@ class _ChipDia extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      width: 40,
-      height: 34,
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
         color: activo
             ? Theme.of(context).colorScheme.primary
