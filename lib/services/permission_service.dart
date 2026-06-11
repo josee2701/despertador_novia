@@ -63,4 +63,16 @@ class PermissionService {
   Future<void> abrirConfiguracion() async {
     await openAppSettings();
   }
+
+  /// Verifica si la app está excluida de las optimizaciones de batería.
+  Future<bool> verificarExencionBateria() async {
+    if (!Platform.isAndroid) return true;
+    return Permission.ignoreBatteryOptimizations.isGranted;
+  }
+
+  /// Solicita al usuario excluir la app de las optimizaciones de batería.
+  Future<void> solicitarExencionBateria() async {
+    if (!Platform.isAndroid) return;
+    await Permission.ignoreBatteryOptimizations.request();
+  }
 }

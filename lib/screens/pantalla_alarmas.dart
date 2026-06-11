@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
 import '../screens/pantalla_alarma_activa.dart';
+import '../widgets/banner_ad_widget.dart';
 import '../widgets/dialogo_alarma.dart';
 import '../widgets/tarjeta_alarma.dart';
 
@@ -473,6 +476,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     },
                   ),
           ),
+
+          // ── Banner publicitario al fondo (solo en móvil) ──
+          if (Platform.isAndroid || Platform.isIOS)
+            const Center(child: BannerAdWidget()),
         ],
       ),
       floatingActionButton: _animarFAB && alarmas.isEmpty

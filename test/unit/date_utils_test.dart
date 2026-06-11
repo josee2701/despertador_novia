@@ -5,10 +5,17 @@ import 'package:despertador_novia/utils/date_utils.dart' as utils;
 void main() {
   group('proximaFecha', () {
     test('alarma diaria sin días: mañana si ya pasó hoy', () {
-      final resultado = utils.proximaFecha(8, 0, []);
-      final esperado = DateTime.now();
-      final manana = DateTime(esperado.year, esperado.month, esperado.day + 1, 8, 0);
-      expect(resultado, manana);
+      final ahora = DateTime.now();
+      // Usar una hora pasada: 1 minuto antes de ahora (o medianoche si es la primera hora)
+      final horaTest = ahora.hour == 0 && ahora.minute == 0 ? 0 : ahora.hour;
+      final minutoTest = ahora.minute == 0 ? 0 : ahora.minute - 1;
+      final baseHoy = DateTime(ahora.year, ahora.month, ahora.day, horaTest, minutoTest);
+      final resultado = utils.proximaFecha(horaTest, minutoTest, []);
+      // Si baseHoy ya pasó → esperamos mañana; si no → esperamos hoy
+      final esperado = baseHoy.isBefore(ahora)
+          ? baseHoy.add(const Duration(days: 1))
+          : baseHoy;
+      expect(resultado, esperado);
     });
 
     test('alarma diaria sin días: hoy si no ha pasado', () {

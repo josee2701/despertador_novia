@@ -88,6 +88,11 @@ class AlarmasPresenter {
     await _verificarPermisoAlarmasExactas();
     await _verificarPermisoNotificaciones();
     await _verificarModoNoMolestar();
+    // Solicitar exención de batería si no está concedida (mejora fiabilidad en Android)
+    final exentoBateria = await _permissionService.verificarExencionBateria();
+    if (!exentoBateria) {
+      await _permissionService.solicitarExencionBateria();
+    }
     _iniciarTimer();
     _iniciarEscuchaRinging();
   }
