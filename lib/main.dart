@@ -5,15 +5,19 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'screens/pantalla_alarmas.dart';
 import 'services/audio_service.dart';
+import 'services/log_service.dart';
 
 /// Punto de entrada de la aplicación.
 ///
 /// Inicializa los servicios necesarios antes de lanzar la app:
+/// - Captura global de errores hacia el registro de diagnóstico
 /// - Genera el archivo de audio de la alarma
 /// - Configura Flutter bindings
 /// - Inicializa el SDK de anuncios móviles
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  _configurarCapturaDeErrores();
 
   // Inicializar SDK de anuncios (no bloqueante)
   unawaited(MobileAds.instance.initialize());
@@ -22,6 +26,29 @@ void main() async {
   await AudioService().prepararSonido();
 
   runApp(const MiDespertadorApp());
+}
+
+/// Engancha los handlers globales de error de Flutter al [LogService] para que
+/// CUALQUIER comportamiento anormal (crashes, asserts, errores async) quede
+/// registrado con marca de tiempo y aparezca en la pantalla de Diagnóstico.
+void _configurarCapturaDeErrores() {
+  // Errores del framework (build, layout, asserts de widgets como Scrollbar).
+  final manejadorPrevio = FlutterError.onError;
+  FlutterError.onError = (details) {
+    manejadorPrevio?.call(details); // Mantiene la consola roja en debug.
+    final lib = details.library == null ? '' : ' [${details.library}]';
+    unawaited(LogService.instancia.registrar(
+      '💥 ERROR$lib: ${details.exceptionAsString()}',
+    ));
+  };
+
+  // Errores asíncronos no capturados (fuera del árbol de widgets).
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    unawaited(
+      LogService.instancia.registrar('💥 ERROR no controlado: $error'),
+    );
+    return false; // Deja que el sistema también lo procese.
+  };
 }
 
 /// Widget raíz de la aplicación.
@@ -38,9 +65,7 @@ class MiDespertadorApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1565C0),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1565C0)),
       ),
       home: const PantallaAlarmas(),
     );

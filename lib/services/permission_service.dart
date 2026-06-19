@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:do_not_disturb/do_not_disturb.dart';
 
@@ -10,6 +12,17 @@ import 'package:do_not_disturb/do_not_disturb.dart';
 /// 2. Modo No Molestar: verifica si está activo, lo que podría silenciar la alarma.
 class PermissionService {
   final _dndPlugin = DoNotDisturbPlugin();
+
+  /// Canal nativo hacia MainActivity.kt (full-screen intent + Autostart OEM).
+  static const MethodChannel _canalSistema =
+      MethodChannel('mi_despertador/sistema');
+
+  /// Fabricantes con gestión de batería agresiva que matan el proceso de la app
+  /// y bloquean alarmas si no se activa el "Inicio automático" manualmente.
+  static const _fabricantesAgresivos = {
+    'xiaomi', 'redmi', 'poco', 'huawei', 'honor',
+    'oppo', 'vivo', 'realme', 'oneplus', 'meizu',
+  };
 
   /// Comprueba si la app tiene permiso para programar alarmas exactas.
   ///
@@ -74,5 +87,131 @@ class PermissionService {
   Future<void> solicitarExencionBateria() async {
     if (!Platform.isAndroid) return;
     await Permission.ignoreBatteryOptimizations.request();
+  }
+
+  /// Comprueba si la app puede mostrar pantallas a pantalla completa sobre el
+  /// lockscreen (full-screen intent).
+  ///
+  /// En Android < 14 siempre true. En Android 14+ el usuario debe concederlo
+  /// manualmente: es la causa #1 de "no aparece la pantalla con el teléfono
+  /// bloqueado" en dispositivos modernos y en MIUI.
+  Future<bool> verificarFullScreenIntent() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _canalSistema
+              .invokeMethod<bool>('puedeUsarFullScreenIntent') ??
+          true;
+    } on PlatformException {
+      return true; // No bloquear si el canal falla.
+    }
+  }
+
+  /// Abre el ajuste del sistema para conceder full-screen intent.
+  Future<void> abrirAjustesFullScreenIntent() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _canalSistema.invokeMethod('abrirAjustesFullScreenIntent');
+    } on PlatformException {
+      await openAppSettings(); // Fallback a ajustes de la app.
+    }
+  }
+
+  /// Abre la pantalla de "Inicio automático" del fabricante (MIUI, EMUI, etc.).
+  ///
+  /// Sin esto, dispositivos Xiaomi/Huawei/Oppo matan el proceso y las alarmas
+  /// no suenan. No hay forma de activarlo programáticamente: solo se abre la
+  /// pantalla y se instruye al usuario.
+  Future<void> abrirAutostartOEM() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _canalSistema.invokeMethod('abrirAutostartOEM');
+    } on PlatformException {
+      await openAppSettings();
+    }
+  }
+
+  /// True si el fabricante del dispositivo mata apps de forma agresiva y por
+  /// tanto conviene mostrar la guía de Inicio automático.
+  Future<bool> esFabricanteAgresivo() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final info = await DeviceInfoPlugin().androidInfo;
+      return _fabricantesAgresivos.contains(info.manufacturer.toLowerCase());
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Devuelve una descripción legible del dispositivo (marca, modelo, Android).
+  Future<String> descripcionDispositivo() async {
+    if (!Platform.isAndroid) {
+      return Platform.operatingSystem;
+    }
+    try {
+      final info = await DeviceInfoPlugin().androidInfo;
+      return '${info.manufacturer} ${info.model} '
+          '— Android ${info.version.release} (SDK ${info.version.sdkInt})';
+    } on PlatformException {
+      return 'Android (desconocido)';
+    }
+  }
+
+  /// Captura el estado actual de todos los permisos críticos.
+  ///
+  /// Se usa tanto en la pantalla de diagnóstico como en el reporte que el
+  /// usuario comparte. Cada clave es legible para humanos.
+  Future<EstadoPermisos> obtenerEstadoPermisos() async {
+    if (!Platform.isAndroid) {
+      return const EstadoPermisos(
+        alarmasExactas: true,
+        notificaciones: true,
+        exencionBateria: true,
+        fullScreenIntent: true,
+        noMolestar: false,
+      );
+    }
+    return EstadoPermisos(
+      alarmasExactas: await Permission.scheduleExactAlarm.isGranted,
+      notificaciones: await Permission.notification.isGranted,
+      exencionBateria: await Permission.ignoreBatteryOptimizations.isGranted,
+      fullScreenIntent: await verificarFullScreenIntent(),
+      noMolestar: await _dndPlugin.isDndEnabled(),
+    );
+  }
+}
+
+/// Instantánea del estado de los permisos del sistema relevantes para las alarmas.
+class EstadoPermisos {
+  final bool alarmasExactas;
+  final bool notificaciones;
+  final bool exencionBateria;
+  final bool fullScreenIntent;
+  final bool noMolestar;
+
+  const EstadoPermisos({
+    required this.alarmasExactas,
+    required this.notificaciones,
+    required this.exencionBateria,
+    required this.fullScreenIntent,
+    required this.noMolestar,
+  });
+
+  /// True si todos los permisos necesarios están concedidos y No Molestar
+  /// no está interfiriendo. Útil para el semáforo de la pantalla de diagnóstico.
+  bool get todoCorrecto =>
+      alarmasExactas &&
+      notificaciones &&
+      exencionBateria &&
+      fullScreenIntent &&
+      !noMolestar;
+
+  /// Resumen en texto plano para incluir en el reporte compartible.
+  String get resumenTexto {
+    String si(bool v) => v ? 'SÍ' : 'NO ⚠';
+    return 'Alarmas exactas: ${si(alarmasExactas)}\n'
+        'Notificaciones: ${si(notificaciones)}\n'
+        'Exención de batería: ${si(exencionBateria)}\n'
+        'Pantalla completa (lockscreen): ${si(fullScreenIntent)}\n'
+        'No Molestar activo: ${noMolestar ? "SÍ ⚠" : "no"}';
   }
 }

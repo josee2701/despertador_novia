@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../models/alarma.dart';
 import '../services/alarm_service.dart';
+import '../services/log_service.dart';
 import '../services/permission_service.dart';
 import '../services/storage_service.dart';
 import '../utils/date_utils.dart';
@@ -51,6 +52,10 @@ class AlarmasPresenter {
   StreamSubscription? _suscripcionRinging;
   AlarmSet _prevAlarmSet = AlarmSet.empty();
   Alarma? _alarmaSonando;
+  /// Momento en que la alarma actual empezó a sonar. Se usa para registrar
+  /// cuántos segundos sonó antes de detenerse (distingue "se apaga al instante"
+  /// — sospecha de audio — de "kill del OS" a los 20-40s en MIUI).
+  DateTime? _inicioSonando;
    // Previene que onAppResumed apile múltiples rutas mientras la alarma sigue sonando.
   bool _alertaEnPantalla = false;
 
@@ -81,8 +86,12 @@ class AlarmasPresenter {
   /// True si hay una alarma sonando activamente.
   bool get hayAlarmaSonando => _alarmaSonando != null;
 
+  /// Atajo para registrar un evento en el log de diagnóstico.
+  void _log(String evento) => unawaited(LogService.instancia.registrar(evento));
+
   /// Inicializa el presenter: carga alarmas, inicia timers y verifica permisos.
   Future<void> iniciar() async {
+    _log('App abierta');
     await _alarmService.init();
     await _cargarAlarmas();
     await _verificarPermisoAlarmasExactas();
@@ -93,6 +102,14 @@ class AlarmasPresenter {
     if (!exentoBateria) {
       await _permissionService.solicitarExencionBateria();
     }
+    // Registrar instantánea de permisos: clave para diagnosticar fallos en MIUI/Xiaomi.
+    final estado = await _permissionService.obtenerEstadoPermisos();
+    _log('Dispositivo: ${await _permissionService.descripcionDispositivo()}');
+    _log('Permisos → exactas:${estado.alarmasExactas} '
+        'notif:${estado.notificaciones} '
+        'bateria:${estado.exencionBateria} '
+        'pantallaCompleta:${estado.fullScreenIntent} '
+        'noMolestar:${estado.noMolestar}');
     _iniciarTimer();
     _iniciarEscuchaRinging();
   }
@@ -144,10 +161,13 @@ class AlarmasPresenter {
           ?? _alarmaDesdeConfig(configuracion);
 
       _alarmaSonando = alarma;
+      _inicioSonando = DateTime.now();
       alarma.pospuesta = false;
       _guardarAlarmas();
 
       final lifecycle = WidgetsBinding.instance.lifecycleState;
+      _log('Alarma #${alarma.id} "${alarma.etiqueta}" DISPARÓ '
+          '(app: ${lifecycle == AppLifecycleState.resumed ? "visible" : "segundo plano/bloqueada"})');
       if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
         // App visible: mostrar banner no intrusivo; el fullscreen es para cuando
         // el teléfono estaba bloqueado (lo maneja onAppResumed).
@@ -163,6 +183,12 @@ class AlarmasPresenter {
   /// Limpia el estado cuando la alarma se detuvo fuera del control de la app
   /// (OS, notificación del sistema, etc.) y reprograma si es recurrente.
   Future<void> _limpiarAlarmaSonandoExterna(Alarma alarma) async {
+    final duracion = _inicioSonando == null
+        ? '?'
+        : '${DateTime.now().difference(_inicioSonando!).inSeconds}s';
+    _log('⚠ Alarma #${alarma.id} detenida EXTERNAMENTE tras sonar $duracion '
+        '(notificación, deslizada o el sistema mató la app)');
+    _inicioSonando = null;
     alarma.pospuesta = false;
     alarma.confirmacionPendiente = false;
     _alarmaSonando = null;
@@ -270,6 +296,8 @@ class AlarmasPresenter {
     // Sigue sonando — mostrar pantalla solo si no hay una ruta ya apilada.
     if (!_alertaEnPantalla) {
       _alertaEnPantalla = true;
+      _log('Pantalla de alarma mostrada al volver a primer plano '
+          '(la alarma seguía sonando)');
       _view.onMostrarPantallaAlarma(_alarmaSonando!);
     }
   }
@@ -346,6 +374,9 @@ class AlarmasPresenter {
     await _alarmService.programarRecordatorio(nuevaAlarma);
     _alarmas.add(nuevaAlarma);
     await _guardarAlarmas();
+    _log('Alarma #${nuevaAlarma.id} "${nuevaAlarma.etiqueta}" programada → '
+        '${formatearHoraAMPM(nuevaAlarma.hora)} '
+        '(${nuevaAlarma.diasSemana.isEmpty ? "una vez" : "repetida"})');
     _view.onAlarmaAgregada();
   }
 
@@ -505,6 +536,7 @@ class AlarmasPresenter {
       await _guardarAlarmas();
       _alarmaSonando = null;
       _alertaEnPantalla = false;
+      _log('Alarma #${alarma.id} pospuesta 5 min por el usuario');
       _view.onAlarmaActualizada();
     } finally {
       Future.delayed(const Duration(milliseconds: 500), () {
@@ -517,6 +549,7 @@ class AlarmasPresenter {
   Future<void> detenerAlarma(Alarma alarma) async {
     _idsEnDetencion.add(alarma.id);
     try {
+      _log('Alarma #${alarma.id} detenida por el usuario (desde la app)');
       await _alarmService.detener(alarma.id);
       // Cancelar siempre el recordatorio del ciclo actual.
       await _alarmService.cancelarRecordatorio(alarma.id);
