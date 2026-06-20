@@ -17,6 +17,7 @@ class FakeAlarmService extends AlarmService {
   final List<Alarma> programadas = [];
   final List<int> detenidas = [];
   final Set<int> sonandoIds = {};
+  final Set<int> recordatoriosProgramados = {};
   List<AlarmSettings> alarmasNativas = [];
 
   final StreamController<AlarmSet> ringingController = StreamController<AlarmSet>.broadcast();
@@ -28,6 +29,16 @@ class FakeAlarmService extends AlarmService {
   Future<void> programar(Alarma alarma) async {
     programadas.removeWhere((a) => a.id == alarma.id);
     programadas.add(alarma.copyWith());
+  }
+
+  @override
+  Future<void> programarRecordatorio(Alarma alarma) async {
+    recordatoriosProgramados.add(alarma.id + AlarmService.offsetRecordatorio);
+  }
+
+  @override
+  Future<void> cancelarRecordatorio(int alarmaId) async {
+    recordatoriosProgramados.remove(alarmaId + AlarmService.offsetRecordatorio);
   }
 
   @override
@@ -82,6 +93,10 @@ class FakePermissionService extends PermissionService {
   Future<void> solicitarPermisoNotificaciones() async {}
   @override
   Future<void> verificarYSolicitarPermisoAlarmasExactas() async {}
+  @override
+  Future<bool> verificarExencionBateria() async => true;
+  @override
+  Future<void> solicitarExencionBateria() async {}
 }
 
 class FakeView implements AlarmasView {

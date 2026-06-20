@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
 import '../screens/pantalla_alarma_activa.dart';
+import '../screens/pantalla_diagnostico.dart';
+import '../widgets/banner_ad_widget.dart';
 import '../widgets/dialogo_alarma.dart';
 import '../widgets/tarjeta_alarma.dart';
 
@@ -113,12 +117,14 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       PageRouteBuilder(
         fullscreenDialog: true,
         barrierColor: Colors.transparent,
-        pageBuilder: (ctx, animation, secondaryAnimation) => PantallaAlarmaActiva(
-          alarma: alarma,
-          onDetener: () => _presenter.detenerAlarma(alarma),
-          onPosponer: () => _presenter.posponerAlarma(alarma),
-          onCerrarConConfirmacion: () => _presenter.cerrarConConfirmacion(alarma), // ← NUEVO
-        ),
+        pageBuilder: (ctx, animation, secondaryAnimation) =>
+            PantallaAlarmaActiva(
+              alarma: alarma,
+              onDetener: () => _presenter.detenerAlarma(alarma),
+              onPosponer: () => _presenter.posponerAlarma(alarma),
+              onCerrarConConfirmacion: () =>
+                  _presenter.cerrarConConfirmacion(alarma), // ← NUEVO
+            ),
       ),
     );
   }
@@ -189,7 +195,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.inversePrimary),
+            Icon(
+              Icons.delete_outline,
+              color: Theme.of(context).colorScheme.inversePrimary,
+            ),
             const SizedBox(width: 12),
             const Text('Alarma eliminada'),
           ],
@@ -242,12 +251,13 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   Widget build(BuildContext context) {
-    final alarmas = [..._presenter.alarmas]..sort((a, b) {
-      if (a.activa != b.activa) return a.activa ? -1 : 1;
-      final horaA = a.horaDelDia * 60 + a.minutoDelDia;
-      final horaB = b.horaDelDia * 60 + b.minutoDelDia;
-      return horaA.compareTo(horaB);
-    });
+    final alarmas = [..._presenter.alarmas]
+      ..sort((a, b) {
+        if (a.activa != b.activa) return a.activa ? -1 : 1;
+        final horaA = a.horaDelDia * 60 + a.minutoDelDia;
+        final horaB = b.horaDelDia * 60 + b.minutoDelDia;
+        return horaA.compareTo(horaB);
+      });
     final proximaTexto = _presenter.obtenerTextoProximaAlarma();
     final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
 
@@ -258,6 +268,22 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.health_and_safety_outlined),
+            tooltip: 'Diagnóstico',
+            iconSize: 26,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const PantallaDiagnostico(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: Column(
         children: [
@@ -299,7 +325,9 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.25),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.25),
                   blurRadius: 16,
                   offset: const Offset(0, 6),
                 ),
@@ -311,11 +339,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.alarm,
-                        color: Colors.white,
-                        size: 20,
-                      ),
+                      const Icon(Icons.alarm, color: Colors.white, size: 20),
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
@@ -362,13 +386,14 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .errorContainer
-                    .withValues(alpha: 0.2),
+                color: Theme.of(
+                  context,
+                ).colorScheme.errorContainer.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.4),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.errorContainer.withValues(alpha: 0.4),
                 ),
               ),
               child: Row(
@@ -409,32 +434,32 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                           duration: const Duration(milliseconds: 1500),
                           curve: Curves.easeInOut,
                           builder: (context, value, child) {
-                            return Transform.scale(
-                              scale: value,
-                              child: child,
-                            );
+                            return Transform.scale(scale: value, child: child);
                           },
                           child: Icon(
                             Icons.alarm_add_outlined,
-                            size: 72,
-                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                            size: 88,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: 0.55),
                           ),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'No tienes alarmas',
                           style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[600],
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.grey[700],
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Toca + para crear tu primera alarma',
+                          'Toca el botón azul para crear tu primera alarma',
+                          textAlign: TextAlign.center,
                           style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[400],
+                            fontSize: 15,
+                            color: Colors.grey[500],
                           ),
                         ),
                       ],
@@ -452,10 +477,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                         builder: (context, value, child) {
                           return Transform.translate(
                             offset: Offset(0, 30 * (1 - value)),
-                            child: Opacity(
-                              opacity: value,
-                              child: child,
-                            ),
+                            child: Opacity(opacity: value, child: child),
                           );
                         },
                         child: RepaintBoundary(
@@ -473,16 +495,27 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                     },
                   ),
           ),
+
+          // ── Banner publicitario (solo móvil) ──
+          if (Platform.isAndroid || Platform.isIOS)
+            const SafeArea(top: false, child: BannerAdWidget()),
         ],
       ),
-      floatingActionButton: _animarFAB && alarmas.isEmpty
-          ? _FABAnimado(onTap: _agregarAlarma)
-          : FloatingActionButton.extended(
-              onPressed: _agregarAlarma,
-              icon: const Icon(Icons.add),
-              label: const Text('Nueva alarma'),
-              elevation: 4,
-            ),
+      // Se eleva el FAB sobre el banner publicitario (~50px) en móvil para que
+      // no lo tape. En escritorio no hay banner, así que sin desplazamiento.
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(
+          bottom: (Platform.isAndroid || Platform.isIOS) ? 24 : 0,
+        ),
+        child: _animarFAB && alarmas.isEmpty
+            ? _FABAnimado(onTap: _agregarAlarma)
+            : FloatingActionButton.extended(
+                onPressed: _agregarAlarma,
+                icon: const Icon(Icons.add),
+                label: const Text('Nueva alarma'),
+                elevation: 4,
+              ),
+      ),
     );
   }
 }
@@ -509,9 +542,10 @@ class _FABAnimadoState extends State<_FABAnimado>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 1.0, end: 1.08).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _animation = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -567,10 +601,7 @@ class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    _animation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOut,
-    );
+    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
     _controller.forward();
   }
 
@@ -595,7 +626,9 @@ class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
           ),
           boxShadow: [
             BoxShadow(
-              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.15),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -628,10 +661,13 @@ class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
                   icon: const Icon(Icons.open_in_full, size: 18),
                   label: const Text('Ver'),
                   style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    foregroundColor: Theme.of(
+                      context,
+                    ).colorScheme.onPrimaryContainer,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                 ),
               ],
@@ -645,9 +681,13 @@ class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
                     icon: const Icon(Icons.snooze, size: 16),
                     label: const Text('5 min'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+                      foregroundColor: Theme.of(
+                        context,
+                      ).colorScheme.onPrimaryContainer,
                       side: BorderSide(
-                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.3),
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 6),
                     ),

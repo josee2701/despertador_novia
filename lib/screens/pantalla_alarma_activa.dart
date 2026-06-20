@@ -133,7 +133,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     final partes = partesHora12h(_ahora);
     final horas = partes.hora.toString();
     final minutos = partes.minuto.toString().padLeft(2, '0');
-    final segundos = _ahora.second.toString().padLeft(2, '0');
     final periodo = partes.periodo;
 
     return PopScope(
@@ -174,7 +173,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 26,
-                            fontWeight: FontWeight.w300,
+                            fontWeight: FontWeight.w500,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -226,16 +225,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                           fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        segundos,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          fontSize: 28,
-                          fontWeight: FontWeight.w200,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
                       const SizedBox(width: 8),
                       Text(
                         periodo,
@@ -258,21 +247,24 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                   )
                 else
                   Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(
                         'Para apagar, $_direccionTexto',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontSize: 18,
-                          fontWeight: FontWeight.w400,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Desliza en esa dirección sobre el botón',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 13,
+                          color: Colors.white.withValues(alpha: 0.55),
+                          fontSize: 15,
                         ),
                       ),
                     ],
@@ -291,36 +283,21 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
                 if (_mostrarBotones && !_desbloqueado)
                   FadeIn(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: _posponer,
-                          icon: const Icon(Icons.snooze),
-                          label: const Text('Posponer 5 min'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 12,
-                            ),
+                    child: Center(
+                      child: OutlinedButton.icon(
+                        onPressed: _posponer,
+                        icon: const Icon(Icons.snooze),
+                        label: const Text('Posponer 5 min'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                          minimumSize: const Size(200, 56),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
                           ),
                         ),
-                        OutlinedButton.icon(
-                          onPressed: _detener,
-                          icon: const Icon(Icons.stop),
-                          label: const Text('Detener'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red[300],
-                            side: BorderSide(color: Colors.red[300]!),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 12,
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
 
