@@ -8,3 +8,8 @@ const nombresDias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 /// Claves de almacenamiento para SharedPreferences.
 const claveAlarmas = 'alarmas';
 const claveNextId = 'nextId';
+
+/// Uptime del dispositivo (ms desde el último arranque) guardado en la sesión
+/// anterior. Si el uptime actual es MENOR, hubo un reinicio entre sesiones:
+/// las alarmas pudieron perderse si el OEM no entregó BOOT_COMPLETED.
+const claveUltimoUptime = 'ultimoUptimeMs';

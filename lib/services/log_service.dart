@@ -59,8 +59,12 @@ class LogService {
   String _marcaTiempo() {
     final ahora = DateTime.now();
     String dos(int n) => n.toString().padLeft(2, '0');
-    return '${dos(ahora.day)}/${dos(ahora.month)} '
-        '${dos(ahora.hour)}:${dos(ahora.minute)}:${dos(ahora.second)}';
+    String tres(int n) => n.toString().padLeft(3, '0');
+    // Incluye año (los reportes cruzan meses) y milisegundos (para medir el gap
+    // real entre "DISPARÓ" y "detenida"; 1-2s redondeado no basta para diagnosticar).
+    return '${dos(ahora.day)}/${dos(ahora.month)}/${ahora.year} '
+        '${dos(ahora.hour)}:${dos(ahora.minute)}:${dos(ahora.second)}'
+        '.${tres(ahora.millisecond)}';
   }
 
   /// Registra un [evento] con marca de tiempo. Nunca lanza excepciones.

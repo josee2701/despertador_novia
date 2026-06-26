@@ -58,6 +58,11 @@ class AlarmService {
       androidFullScreenIntent: true,
       // Mostrar advertencia si el OS mata la app, mejora fiabilidad en Android agresivos.
       warningNotificationOnKill: true,
+      // CRÍTICO: por defecto el package detiene la alarma cuando el usuario quita
+      // la app de "Recientes" (onTaskRemoved → stopSelf), apagando el sonido a
+      // los 1-2s. Con false el foreground service sigue sonando aunque se quite
+      // la app de Recientes. El botón "Detener" de la notificación sigue funcionando.
+      androidStopAlarmOnTermination: false,
     );
   }
 

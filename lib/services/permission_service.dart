@@ -130,6 +130,20 @@ class PermissionService {
     }
   }
 
+  /// Milisegundos desde el último arranque del dispositivo (uptime).
+  ///
+  /// Se usa para detectar reinicios entre sesiones: si el valor es menor que el
+  /// guardado la sesión anterior, el teléfono se reinició y las alarmas pudieron
+  /// perderse si el OEM no entregó BOOT_COMPLETED. Devuelve null si no aplica.
+  Future<int?> tiempoEncendidoMs() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _canalSistema.invokeMethod<int>('tiempoEncendidoMs');
+    } on PlatformException {
+      return null;
+    }
+  }
+
   /// True si el fabricante del dispositivo mata apps de forma agresiva y por
   /// tanto conviene mostrar la guía de Inicio automático.
   Future<bool> esFabricanteAgresivo() async {

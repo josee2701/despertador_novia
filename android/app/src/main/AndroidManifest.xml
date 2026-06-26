@@ -13,6 +13,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Necesario para excluir la app de optimizaciones de batería (Xiaomi, Huawei, Samsung) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- Foreground service de reproducción: la alarma suena mediante un servicio en
+         primer plano de tipo mediaPlayback. En Android 14 (SDK 34) el tipo debe
+         declararse explícitamente. El package `alarm` ya los hereda vía merge, pero
+         declararlos aquí deja el contrato explícito y a prueba de cambios de package. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <application
         android:label="Bella Durmiente"
         android:name="${applicationName}"

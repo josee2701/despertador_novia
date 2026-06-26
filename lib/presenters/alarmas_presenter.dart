@@ -93,6 +93,7 @@ class AlarmasPresenter {
   Future<void> iniciar() async {
     _log('App abierta');
     await _alarmService.init();
+    await _detectarReinicio();
     await _cargarAlarmas();
     await _verificarPermisoAlarmasExactas();
     await _verificarPermisoNotificaciones();
@@ -112,6 +113,29 @@ class AlarmasPresenter {
         'noMolestar:${estado.noMolestar}');
     _iniciarTimer();
     _iniciarEscuchaRinging();
+  }
+
+  /// Detecta si el dispositivo se reinició desde la última sesión comparando el
+  /// uptime actual con el guardado. Un descenso implica reinicio: las alarmas
+  /// pudieron perderse si el OEM no entregó BOOT_COMPLETED (la auditoría de
+  /// [_cargarAlarmas] las reprograma). Registra el resultado para el diagnóstico.
+  Future<void> _detectarReinicio() async {
+    final uptimeActual = await _permissionService.tiempoEncendidoMs();
+    if (uptimeActual == null) return;
+    final uptimeAnterior = await _storageService.cargarUptime();
+    String formato(int ms) {
+      final h = ms ~/ 3600000;
+      final m = (ms % 3600000) ~/ 60000;
+      return '${h}h ${m}min';
+    }
+    if (uptimeAnterior != null && uptimeActual < uptimeAnterior) {
+      _log('⚠ REINICIO del dispositivo detectado desde la última sesión '
+          '(uptime ${formato(uptimeActual)} < ${formato(uptimeAnterior)}). '
+          'Verificando alarmas programadas…');
+    } else {
+      _log('Sesión: uptime del dispositivo ${formato(uptimeActual)}');
+    }
+    await _storageService.guardarUptime(uptimeActual);
   }
 
   /// Configura la vista asociada (útil si la vista cambia).
@@ -312,16 +336,31 @@ class AlarmasPresenter {
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
 
-    // Limpiar alarmas nativas huérfanas (no están en nuestra lista activa).
-    // Se excluyen los recordatorios (id > offsetRecordatorio): se gestionan
-    // por separado y se reprograman más abajo junto con sus alarmas.
+    // Auditoría al abrir: comparar las alarmas que DEBERÍAN estar programadas
+    // (activas en nuestra lista) con las que el sistema tiene realmente.
+    // - Huérfanas (en el sistema pero no en la lista) → se cancelan.
+    // - Faltantes (en la lista pero NO en el sistema) → se perdieron (reinicio
+    //   o el OEM canceló el AlarmManager); se reprograman más abajo. Esto deja
+    //   en el log evidencia inequívoca de pérdidas silenciosas.
     final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
     final alarmasNativas = await _alarmService.getAlarmasNativas();
+    final idsNativas = alarmasNativas
+        .where((n) => !AlarmService.esIdRecordatorio(n.id))
+        .map((n) => n.id)
+        .toSet();
     for (final nativa in alarmasNativas) {
       if (AlarmService.esIdRecordatorio(nativa.id)) continue;
       if (!idsActivas.contains(nativa.id)) {
         await _alarmService.detener(nativa.id);
       }
+    }
+    final faltantes = idsActivas.difference(idsNativas);
+    if (faltantes.isEmpty) {
+      _log('Auditoría al abrir: ${idsActivas.length} alarma(s) activa(s), '
+          'todas presentes en el sistema. OK');
+    } else {
+      _log('⚠ Auditoría al abrir: alarma(s) $faltantes FALTABAN en el sistema '
+          '(posible reinicio o cancelación por el OEM). Reprogramando…');
     }
 
     final ahora = DateTime.now();
