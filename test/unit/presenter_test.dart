@@ -675,6 +675,41 @@ void main() {
     });
   });
 
+  // ── control del timer ──────────────────────────────────────────────────────
+
+  group('control del timer', () {
+    test('pausarTimer detiene el timer', () async {
+      await arrancar();
+      expect(presenter.timerActivo, isTrue);
+      presenter.pausarTimer();
+      expect(presenter.timerActivo, isFalse);
+    });
+
+    test('reanudarTimer reactiva el timer', () async {
+      await arrancar();
+      presenter.pausarTimer();
+      expect(presenter.timerActivo, isFalse);
+      presenter.reanudarTimer();
+      expect(presenter.timerActivo, isTrue);
+    });
+
+    test('reanudarTimer refresca ahoraNotifier inmediatamente', () async {
+      await arrancar();
+      presenter.pausarTimer();
+      final antes = presenter.ahoraNotifier.value;
+      await Future.delayed(const Duration(milliseconds: 15));
+      presenter.reanudarTimer();
+      expect(presenter.ahoraNotifier.value.isAfter(antes), isTrue);
+    });
+
+    test('reanudarTimer no crea doble timer', () async {
+      await arrancar();
+      presenter.reanudarTimer();
+      presenter.reanudarTimer();
+      expect(presenter.timerActivo, isTrue);
+    });
+  });
+
   // ── dispose ────────────────────────────────────────────────────────────────
 
   group('dispose', () {

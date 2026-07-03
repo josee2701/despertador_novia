@@ -48,7 +48,15 @@ class AlarmasPresenter {
   int _nextId = 1;
   bool _modoNoMolestar = false;
   DateTime _ahora = DateTime.now();
+
+  /// Notifica cada segundo la hora actual sin reconstruir toda la pantalla.
+  /// La vista escucha este notifier con un [ValueListenableBuilder] que solo
+  /// envuelve el texto de "Próxima alarma", evitando ~60 rebuilds/min del
+  /// header, la lista de tarjetas y el banner.
+  final ValueNotifier<DateTime> ahoraNotifier = ValueNotifier(DateTime.now());
+
   Timer? _timer;
+  bool _disposed = false;
   StreamSubscription? _suscripcionRinging;
   AlarmSet _prevAlarmSet = AlarmSet.empty();
   Alarma? _alarmaSonando;
@@ -141,15 +149,40 @@ class AlarmasPresenter {
   /// Configura la vista asociada (útil si la vista cambia).
   set view(AlarmasView v) => _view = v;
 
-  /// Actualiza la hora actual y notifica a la vista.
+  /// Actualiza la hora actual y la publica en [ahoraNotifier].
+  ///
+  /// Ya NO llama a `_view.onAlarmasCargadas()`: el reloj de "Próxima alarma"
+  /// se refresca vía [ahoraNotifier] (solo reconstruye ese texto), evitando
+  /// reconstruir toda la pantalla cada segundo.
   void _tick() {
     _ahora = DateTime.now();
-    _view.onAlarmasCargadas();
+    ahoraNotifier.value = _ahora;
   }
 
   /// Inicia un timer que actualiza la hora cada segundo.
   void _iniciarTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  /// True si el timer de reloj está activo. Expuesto para pruebas.
+  bool get timerActivo => _timer?.isActive ?? false;
+
+  /// Pausa el timer del reloj (p. ej. al pasar la app a segundo plano).
+  /// Evita trabajo innecesario cuando la pantalla no es visible.
+  void pausarTimer() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  /// Reanuda el timer del reloj (p. ej. al volver a primer plano).
+  ///
+  /// Hace un [_tick] inmediato para refrescar la hora sin esperar 1s y evita
+  /// crear un segundo timer si ya había uno activo.
+  void reanudarTimer() {
+    if (_timer == null) {
+      _tick();
+      _iniciarTimer();
+    }
   }
 
   /// Escucha el stream de alarmas sonando y muestra la pantalla de alarma.
@@ -655,7 +688,10 @@ class AlarmasPresenter {
 
   /// Limpia recursos al destruir la vista.
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     _timer?.cancel();
     _suscripcionRinging?.cancel();
+    ahoraNotifier.dispose();
   }
 }
