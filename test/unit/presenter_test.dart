@@ -173,11 +173,13 @@ void main() {
   late FakeView view;
   late FakeAlarmService alarm;
   late FakeStorageService storage;
+  late List<String> eventosLog;
 
   setUp(() {
     view = FakeView();
     alarm = FakeAlarmService();
     storage = FakeStorageService();
+    eventosLog = [];
   });
 
   tearDown(() {
@@ -193,6 +195,7 @@ void main() {
       alarmService: alarm,
       storageService: storage,
       permissionService: FakePermissionService(),
+      registro: eventosLog.add,
     );
     await presenter.iniciar();
   }
@@ -707,6 +710,51 @@ void main() {
       presenter.reanudarTimer();
       presenter.reanudarTimer();
       expect(presenter.timerActivo, isTrue);
+    });
+  });
+
+  // ── cobertura del log de diagnóstico ───────────────────────────────────────
+
+  group('cobertura del log', () {
+    bool logContiene(String fragmento) =>
+        eventosLog.any((e) => e.toLowerCase().contains(fragmento.toLowerCase()));
+
+    test('toggle registra activación y desactivación', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, activa: true)]);
+
+      await presenter.toggleAlarma(presenter.alarmas.first, false);
+      expect(logContiene('desactivada'), isTrue);
+
+      await presenter.toggleAlarma(presenter.alarmas.first, true);
+      expect(logContiene('activada'), isTrue);
+    });
+
+    test('eliminar registra el evento', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+      await presenter.eliminarAlarma(presenter.alarmas.first);
+      expect(logContiene('eliminada'), isTrue);
+    });
+
+    test('restaurar (deshacer) registra el evento', () async {
+      await arrancar();
+      await presenter.restaurarAlarma(_alarmaSimple(id: 1));
+      expect(logContiene('restaurada'), isTrue);
+    });
+
+    test('editar registra el evento', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+      await presenter.actualizarAlarmaCompleta(
+        alarma: presenter.alarmas.first,
+        nuevaHora: 9,
+        nuevoMinuto: 15,
+      );
+      expect(logContiene('editada'), isTrue);
+    });
+
+    test('cerrar con confirmación registra el re-sonido de 30s', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+      await presenter.cerrarConConfirmacion(presenter.alarmas.first);
+      expect(logContiene('confirmar despertar'), isTrue);
     });
   });
 

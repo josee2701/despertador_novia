@@ -72,15 +72,26 @@ class AlarmasPresenter {
   /// cerrarConConfirmacion / detenerAlarma / posponerAlarma.
   final Set<int> _idsEnDetencion = {};
 
+  /// Tiempo tras el cual la alarma vuelve a sonar cuando el usuario cierra la
+  /// pantalla con "confirmación de despertar", para asegurar que despertó.
+  static const Duration duracionConfirmacion = Duration(seconds: 30);
+
   AlarmasPresenter({
     required AlarmasView view,
     AlarmService? alarmService,
     StorageService? storageService,
     PermissionService? permissionService,
+    void Function(String evento)? registro,
   })  : _view = view,
         _alarmService = alarmService ?? AlarmService(),
         _storageService = storageService ?? StorageService(),
-        _permissionService = permissionService ?? PermissionService();
+        _permissionService = permissionService ?? PermissionService(),
+        _registro = registro ??
+            ((evento) => unawaited(LogService.instancia.registrar(evento)));
+
+  /// Sumidero del log de diagnóstico. Inyectable para poder verificar en las
+  /// pruebas que cada evento (suena, se detiene, se edita…) queda registrado.
+  final void Function(String evento) _registro;
 
   /// Lista inmutable de alarmas actuales.
   List<Alarma> get alarmas => List.unmodifiable(_alarmas);
@@ -95,7 +106,7 @@ class AlarmasPresenter {
   bool get hayAlarmaSonando => _alarmaSonando != null;
 
   /// Atajo para registrar un evento en el log de diagnóstico.
-  void _log(String evento) => unawaited(LogService.instancia.registrar(evento));
+  void _log(String evento) => _registro(evento);
 
   /// Inicializa el presenter: carga alarmas, inicia timers y verifica permisos.
   Future<void> iniciar() async {
@@ -210,6 +221,8 @@ class AlarmasPresenter {
       // Filtrar recordatorios: son silenciosos y no deben mostrar pantalla de alarma.
       // El package los detiene automáticamente (loopAudio: false); solo los limpiamos.
       if (AlarmService.esIdRecordatorio(configuracion.id)) {
+        _log('Recordatorio (30 min antes) disparó para alarma '
+            '#${configuracion.id - AlarmService.offsetRecordatorio}');
         unawaited(_alarmService.detener(configuracion.id));
         continue;
       }
@@ -223,7 +236,10 @@ class AlarmasPresenter {
       _guardarAlarmas();
 
       final lifecycle = WidgetsBinding.instance.lifecycleState;
-      _log('Alarma #${alarma.id} "${alarma.etiqueta}" DISPARÓ '
+      final tipoDisparo = alarma.confirmacionPendiente
+          ? 'RE-SONÓ (confirmación de despertar a los 30s)'
+          : 'DISPARÓ';
+      _log('Alarma #${alarma.id} "${alarma.etiqueta}" $tipoDisparo '
           '(app: ${lifecycle == AppLifecycleState.resumed ? "visible" : "segundo plano/bloqueada"})');
       if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
         // App visible: mostrar banner no intrusivo; el fullscreen es para cuando
@@ -302,6 +318,7 @@ class AlarmasPresenter {
     final activo = await _permissionService.verificarModoNoMolestar();
     if (activo != _modoNoMolestar) {
       _modoNoMolestar = activo;
+      _log('Modo No Molestar ${activo ? "ACTIVADO — las alarmas podrían no sonar" : "desactivado"}');
       _view.onModoNoMolestarCambiado(activo);
     }
   }
@@ -465,6 +482,8 @@ class AlarmasPresenter {
     }
     alarma.activa = activa;
     await _guardarAlarmas();
+    _log('Alarma #${alarma.id} "${alarma.etiqueta}" '
+        '${activa ? "ACTIVADA" : "desactivada"} por el usuario');
     _view.onAlarmaActualizada();
   }
 
@@ -474,6 +493,7 @@ class AlarmasPresenter {
     await _alarmService.cancelarRecordatorio(alarma.id);
     _alarmas.remove(alarma);
     await _guardarAlarmas();
+    _log('Alarma #${alarma.id} "${alarma.etiqueta}" eliminada por el usuario');
     _view.onAlarmaEliminada();
   }
 
@@ -487,6 +507,7 @@ class AlarmasPresenter {
       await _alarmService.programarRecordatorio(alarma);
     }
     await _guardarAlarmas();
+    _log('Alarma #${alarma.id} "${alarma.etiqueta}" restaurada (deshacer)');
     _view.onAlarmaAgregada();
   }
 
@@ -571,6 +592,7 @@ class AlarmasPresenter {
       }
     }
     await _guardarAlarmas();
+    _log('Alarma #${alarma.id} "${alarma.etiqueta}" editada por el usuario');
     _view.onAlarmaActualizada();
   }
 
@@ -664,11 +686,13 @@ class AlarmasPresenter {
       alarma.confirmacionPendiente = true;
       alarma.pospuesta = false;
 
-      // Programar el re-sonido a los 30 segundos
-      alarma.hora = DateTime.now().add(const Duration(seconds: 30));
+      // Programar el re-sonido tras la ventana de confirmación.
+      alarma.hora = DateTime.now().add(duracionConfirmacion);
       await _alarmService.programar(alarma);
 
       await _guardarAlarmas();
+      _log('Alarma #${alarma.id} "${alarma.etiqueta}" cerrada con confirmación: '
+          're-sonará en ${duracionConfirmacion.inSeconds}s para confirmar despertar');
 
       // Limpiar estado de alarma sonando para que la UI vuelva a la pantalla principal
       _alarmaSonando = null;
