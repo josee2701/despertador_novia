@@ -81,6 +81,18 @@ class FakeStorageService extends StorageService {
 }
 
 class FakePermissionService extends PermissionService {
+  /// Controla el estado de full-screen intent devuelto por obtenerEstadoPermisos.
+  bool fullScreenIntentConcedido = true;
+
+  @override
+  Future<EstadoPermisos> obtenerEstadoPermisos() async => EstadoPermisos(
+        alarmasExactas: true,
+        notificaciones: true,
+        exencionBateria: true,
+        fullScreenIntent: fullScreenIntentConcedido,
+        noMolestar: false,
+      );
+
   @override
   Future<bool> verificarPermisoAlarmasExactas() async => true;
   @override
@@ -121,6 +133,9 @@ class FakeView implements AlarmasView {
   void onPermisoNecesario(bool necesita) => permisoNecesario = necesita;
   @override
   void onModoNoMolestarCambiado(bool activo) => modoNoMolestar = activo;
+  bool fullScreenDenegado = false;
+  @override
+  void onFullScreenIntentDenegado(bool denegado) => fullScreenDenegado = denegado;
   @override
   void onMostrarPantallaAlarma(Alarma alarma) => ultimaAlarmaRinging = alarma;
   @override
@@ -755,6 +770,31 @@ void main() {
       await arrancar(alarmas: [_alarmaSimple(id: 1)]);
       await presenter.cerrarConConfirmacion(presenter.alarmas.first);
       expect(logContiene('confirmar despertar'), isTrue);
+    });
+  });
+
+  // ── aviso de full-screen intent ────────────────────────────────────────────
+
+  group('aviso full-screen intent', () {
+    test('avisa a la vista si el full-screen intent está denegado', () async {
+      storage.precargar(const []);
+      final permisos = FakePermissionService()
+        ..fullScreenIntentConcedido = false;
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        registro: eventosLog.add,
+      );
+      await presenter.iniciar();
+
+      expect(view.fullScreenDenegado, isTrue);
+    });
+
+    test('no avisa si el full-screen intent está concedido', () async {
+      await arrancar();
+      expect(view.fullScreenDenegado, isFalse);
     });
   });
 

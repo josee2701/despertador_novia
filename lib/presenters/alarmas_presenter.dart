@@ -23,6 +23,7 @@ abstract class AlarmasView {
   void onAlarmaEliminada();
   void onPermisoNecesario(bool necesita);
   void onModoNoMolestarCambiado(bool activo);
+  void onFullScreenIntentDenegado(bool denegado);
   void onMostrarPantallaAlarma(Alarma alarma);
   void onAlarmaSonandoEnForeground(Alarma alarma);
   BuildContext getContext();
@@ -130,8 +131,16 @@ class AlarmasPresenter {
         'bateria:${estado.exencionBateria} '
         'pantallaCompleta:${estado.fullScreenIntent} '
         'noMolestar:${estado.noMolestar}');
+    // Avisar a la vista si no puede mostrar la alarma sobre el lockscreen:
+    // causa #1 de "no aparece la pantalla con el teléfono bloqueado" en Android 14+/MIUI.
+    _view.onFullScreenIntentDenegado(!estado.fullScreenIntent);
     _iniciarTimer();
     _iniciarEscuchaRinging();
+  }
+
+  /// Abre el ajuste del sistema para conceder el full-screen intent.
+  Future<void> abrirAjustesFullScreenIntent() async {
+    await _permissionService.abrirAjustesFullScreenIntent();
   }
 
   /// Detecta si el dispositivo se reinició desde la última sesión comparando el

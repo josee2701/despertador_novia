@@ -33,6 +33,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   late final AlarmasPresenter _presenter;
   late final AppOpenAdManager _appOpenAd;
   bool _modoNoMolestar = false;
+  bool _fullScreenDenegado = false;
   bool _animarFAB = false;
   Alarma? _alarmaRinging;
 
@@ -131,6 +132,11 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   @override
   void onModoNoMolestarCambiado(bool activo) {
     if (mounted) setState(() => _modoNoMolestar = activo);
+  }
+
+  @override
+  void onFullScreenIntentDenegado(bool denegado) {
+    if (mounted) setState(() => _fullScreenDenegado = denegado);
   }
 
   @override
@@ -267,6 +273,47 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
             },
             child: const Text('Ir a Configuración'),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Banner de advertencia (fondo error suave) con un botón de acción.
+  /// Reutilizado por los avisos de No Molestar y de pantalla completa.
+  Widget _bannerAdvertencia({
+    required String texto,
+    required String textoBoton,
+    required VoidCallback onPressed,
+  }) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: Theme.of(context).colorScheme.onErrorContainer,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              texto,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onErrorContainer,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(onPressed: onPressed, child: Text(textoBoton)),
         ],
       ),
     );
@@ -416,44 +463,19 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
           // ── Advertencia No Molestar ──
           if (_modoNoMolestar)
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.errorContainer.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.errorContainer.withValues(alpha: 0.4),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Modo No Molestar activo — Tu alarma podría no sonar',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onErrorContainer,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => _presenter.abrirConfiguracion(),
-                    child: const Text('Abrir config.'),
-                  ),
-                ],
-              ),
+            _bannerAdvertencia(
+              texto: 'Modo No Molestar activo — Tu alarma podría no sonar',
+              textoBoton: 'Abrir config.',
+              onPressed: () => _presenter.abrirConfiguracion(),
+            ),
+
+          // ── Advertencia full-screen intent (Android 14+/MIUI) ──
+          if (_fullScreenDenegado)
+            _bannerAdvertencia(
+              texto: 'Sin permiso de pantalla completa — la alarma podría no '
+                  'aparecer con el teléfono bloqueado',
+              textoBoton: 'Conceder',
+              onPressed: () => _presenter.abrirAjustesFullScreenIntent(),
             ),
 
           // ── Lista de alarmas ──
