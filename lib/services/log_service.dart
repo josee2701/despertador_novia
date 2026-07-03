@@ -10,18 +10,54 @@ import 'package:path_provider/path_provider.dart';
 /// documentos. Sirve para detectar el momento exacto en que una alarma falla:
 /// si se registra "programada" pero nunca "DISPARÓ", el sistema mató la app.
 ///
-/// El archivo se recorta automáticamente para no crecer sin límite.
+/// El archivo se recorta automáticamente para no crecer sin límite. El recorte
+/// es POR LOTES (no en cada escritura): se cuenta en memoria cuántas líneas hay
+/// y solo se relee/reescribe el archivo cuando se supera [_maxLineas] + margen.
+/// Esto evita una lectura O(n) del archivo completo en cada `registrar`.
+///
 /// Es un singleton: usar [LogService.instancia].
 class LogService {
-  LogService._();
+  LogService._({int maxLineas = 600, int margenRecorte = 100})
+      : _maxLineas = maxLineas,
+        _margenRecorte = margenRecorte;
 
   /// Instancia única compartida en toda la app.
   static final LogService instancia = LogService._();
 
+  /// Crea una instancia aislada para pruebas que escribe en [archivo], sin
+  /// depender de path_provider. Permite umbrales pequeños para verificar el
+  /// comportamiento de recorte sin escribir cientos de líneas.
+  @visibleForTesting
+  factory LogService.paraPruebas(
+    File archivo, {
+    int maxLineas = 5,
+    int margenRecorte = 2,
+  }) {
+    final servicio =
+        LogService._(maxLineas: maxLineas, margenRecorte: margenRecorte);
+    servicio._archivo = archivo;
+    return servicio;
+  }
+
   static const String _nombreArchivo = 'diagnostico_alarmas.log';
 
-  /// Máximo de líneas conservadas. Al superarse, se descartan las más antiguas.
-  static const int _maxLineas = 600;
+  /// Máximo de líneas conservadas. Al superarse (+ margen), se recorta.
+  final int _maxLineas;
+
+  /// Margen de líneas extra que se permite acumular antes de recortar, para no
+  /// releer/reescribir el archivo en cada línea.
+  final int _margenRecorte;
+
+  /// Conteo en memoria de líneas del archivo, para decidir el recorte sin leer.
+  int _lineasEstimadas = 0;
+
+  /// Si el archivo ya se abrió y se contó su tamaño inicial una vez.
+  bool _inicializado = false;
+
+  /// Nº de recortes realizados. Expuesto solo para pruebas de eficiencia.
+  int _recortesRealizados = 0;
+  @visibleForTesting
+  int get recortesRealizados => _recortesRealizados;
 
   File? _archivo;
 
@@ -46,13 +82,17 @@ class LogService {
   }
 
   Future<File> _obtenerArchivo() async {
-    if (_archivo != null) return _archivo!;
-    final dir = await getApplicationDocumentsDirectory();
-    final archivo = File('${dir.path}/$_nombreArchivo');
+    if (_inicializado && _archivo != null) return _archivo!;
+    // En pruebas, _archivo ya viene fijado; en producción se resuelve aquí.
+    final archivo = _archivo ??
+        File('${(await getApplicationDocumentsDirectory()).path}/$_nombreArchivo');
     if (!await archivo.exists()) {
       await archivo.create(recursive: true);
     }
+    // Conteo inicial una sola vez; luego se mantiene en memoria.
+    _lineasEstimadas = (await archivo.readAsLines()).length;
     _archivo = archivo;
+    _inicializado = true;
     return archivo;
   }
 
@@ -74,22 +114,31 @@ class LogService {
     return _encolar(() async {
       try {
         final archivo = await _obtenerArchivo();
+        // flush:true por durabilidad: el diagnóstico debe sobrevivir a que el OS
+        // mate el proceso justo tras un evento crítico (la última línea importa).
         await archivo.writeAsString('$linea\n',
             mode: FileMode.append, flush: true);
-        await _recortarSiHaceFalta(archivo);
+        _lineasEstimadas++;
+        // Recorte POR LOTES: solo cuando se supera el máximo + margen, evitando
+        // releer todo el archivo en cada escritura.
+        if (_lineasEstimadas > _maxLineas + _margenRecorte) {
+          await _recortar(archivo);
+        }
       } catch (e) {
         debugPrint('LogService.registrar error: $e');
       }
     });
   }
 
-  /// Si el archivo supera [_maxLineas], conserva solo las más recientes.
-  Future<void> _recortarSiHaceFalta(File archivo) async {
+  /// Conserva solo las [_maxLineas] más recientes y actualiza el conteo.
+  Future<void> _recortar(File archivo) async {
     try {
       final lineas = await archivo.readAsLines();
       if (lineas.length > _maxLineas) {
         final recortadas = lineas.sublist(lineas.length - _maxLineas);
         await archivo.writeAsString('${recortadas.join('\n')}\n');
+        _lineasEstimadas = recortadas.length;
+        _recortesRealizados++;
       }
     } catch (_) {
       // No interrumpir el flujo por un fallo de recorte.
