@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -6,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../utils/constantes.dart';
+import 'log_service.dart';
 
 /// Servicio encargado de generar y gestionar el archivo de audio de la alarma.
 ///
@@ -21,8 +23,17 @@ class AudioService {
       final archivo = File('${dir.path}/$archivoSonido');
       if (!archivo.existsSync()) {
         await archivo.writeAsBytes(_generarWavBarrido());
+        unawaited(LogService.instancia
+            .registrar('Audio de alarma generado (WAV creado correctamente)'));
+      } else {
+        unawaited(LogService.instancia
+            .registrar('Audio de alarma OK (WAV ya existía)'));
       }
     } catch (e) {
+      // Fallo aquí es la causa clásica de "la alarma suena y se apaga al instante".
+      unawaited(LogService.instancia.registrar(
+          '⚠ ERROR: no se pudo generar el audio de alarma (la alarma podría no '
+          'sonar): $e'));
       debugPrint('AudioService: no se pudo generar el audio de alarma: $e');
     }
   }
