@@ -7,6 +7,7 @@ import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
 import '../screens/pantalla_alarma_activa.dart';
 import '../screens/pantalla_diagnostico.dart';
+import '../services/app_open_ad_manager.dart';
 import '../widgets/banner_ad_widget.dart';
 import '../widgets/dialogo_alarma.dart';
 import '../widgets/tarjeta_alarma.dart';
@@ -30,6 +31,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     with WidgetsBindingObserver
     implements AlarmasView {
   late final AlarmasPresenter _presenter;
+  late final AppOpenAdManager _appOpenAd;
   bool _modoNoMolestar = false;
   bool _animarFAB = false;
   Alarma? _alarmaRinging;
@@ -43,6 +45,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       debugPrint('Error al iniciar presenter: $e');
     });
 
+    // Anuncio de apertura: precarga uno (solo tiene efecto en móvil).
+    _appOpenAd = AppOpenAdManager();
+    _appOpenAd.cargar();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final alarmas = _presenter.alarmas;
       if (alarmas.isEmpty && mounted) {
@@ -55,13 +61,32 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _presenter.dispose();
+    _appOpenAd.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _presenter.onAppResumed();
+      // Reanudar el reloj al volver a primer plano (refresca de inmediato).
+      _presenter.reanudarTimer();
+      // onAppResumed es async: se ESPERA a que termine antes de decidir el
+      // anuncio. Así hayAlarmaSonando ya refleja la comprobación de
+      // alarmIsRinging y, si había alarma, la pantalla de alarma ya se habrá
+      // mostrado — el candado impide que el anuncio aparezca sobre ella.
+      _presenter.onAppResumed().then((_) {
+        if (!mounted) return;
+        _appOpenAd.mostrarSiProcede(
+          hayAlarmaSonando: _presenter.hayAlarmaSonando,
+        );
+      });
+    } else if (state == AppLifecycleState.paused) {
+      // Pausar el reloj en segundo plano para no gastar CPU en algo invisible.
+      // No se pausa en inactive/hidden para evitar parpadeos en transiciones.
+      _presenter.pausarTimer();
+      // Marca que la app estuvo en segundo plano: habilita el resume caliente
+      // del anuncio (evita mostrarlo en arranque en frío / apertura por alarma).
+      _appOpenAd.marcarEnPausa();
     }
   }
 
@@ -258,8 +283,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         final horaB = b.horaDelDia * 60 + b.minutoDelDia;
         return horaA.compareTo(horaB);
       });
-    final proximaTexto = _presenter.obtenerTextoProximaAlarma();
-    final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -333,50 +356,61 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                 ),
               ],
             ),
-            child: Column(
-              children: [
-                if (hayAlarmas)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.alarm, color: Colors.white, size: 20),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          'Próxima alarma: $proximaTexto',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
+            // Solo este texto ("Próxima alarma… en X") se reconstruye cada
+            // segundo, escuchando ahoraNotifier. El resto de la pantalla
+            // (gradiente, lista, banner) queda fuera y no se reconstruye.
+            child: ValueListenableBuilder<DateTime>(
+              valueListenable: _presenter.ahoraNotifier,
+              builder: (context, _, _) {
+                final proximaTexto = _presenter.obtenerTextoProximaAlarma();
+                final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
+                return Column(
+                  children: [
+                    if (hayAlarmas)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.alarm,
+                              color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Próxima alarma: $proximaTexto',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        ],
+                      )
+                    else
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.nights_stay_outlined,
+                            color: Colors.white.withValues(alpha: 0.8),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            proximaTexto,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
-                    ],
-                  )
-                else
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.nights_stay_outlined,
-                        color: Colors.white.withValues(alpha: 0.8),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        proximaTexto,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 15,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
 
