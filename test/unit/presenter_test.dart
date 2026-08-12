@@ -711,6 +711,29 @@ void main() {
       expect(presenter.timerActivo, isTrue);
     });
 
+    test('reanudarTimer durante iniciar() no deja un timer huérfano', () async {
+      storage.precargar([]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: FakePermissionService(),
+        registro: eventosLog.add,
+      );
+
+      // iniciar() aún está en vuelo: simula el resume de un diálogo de permisos.
+      final arranque = presenter.iniciar();
+      presenter.reanudarTimer();
+      await arranque;
+
+      presenter.pausarTimer();
+      final congelado = presenter.ahoraNotifier.value;
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+
+      expect(presenter.ahoraNotifier.value, congelado,
+          reason: 'Un timer huérfano seguiría actualizando el reloj tras pausar');
+    });
+
     test('reanudarTimer refresca ahoraNotifier inmediatamente', () async {
       await arrancar();
       presenter.pausarTimer();

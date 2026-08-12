@@ -180,7 +180,13 @@ class AlarmasPresenter {
   }
 
   /// Inicia un timer que actualiza la hora cada segundo.
+  ///
+  /// Cancela cualquier timer previo: `iniciar()` espera diálogos de permisos y
+  /// el resume de esos diálogos puede haber creado ya un timer vía
+  /// [reanudarTimer]. Sin este cancel, el anterior quedaría huérfano y seguiría
+  /// escribiendo en [ahoraNotifier] después del `dispose()`.
   void _iniciarTimer() {
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
