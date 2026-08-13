@@ -76,6 +76,30 @@ class AlarmasPresenter {
   /// cerrarConConfirmacion / detenerAlarma / posponerAlarma.
   final Set<int> _idsEnDetencion = {};
 
+  /// True cuando [iniciar] terminó por completo.
+  ///
+  /// `iniciar()` abre diálogos del sistema (notificaciones, exención de
+  /// batería). Al cerrarlos llega `resumed` y la vista llama a [onAppResumed]
+  /// EN PARALELO con el resto de `iniciar()`, antes de que la escucha de
+  /// `Alarm.ringing` exista. Auditar y normalizar sobre ese estado a medio
+  /// construir puede cancelar como huérfana una alarma que está sonando.
+  bool _iniciado = false;
+
+  /// Guardia de reentrada de [onAppResumed]: dos `resumed` encadenados no
+  /// deben auditar a la vez sobre la misma lista.
+  bool _procesandoResume = false;
+
+  /// Desplazamiento con el que las versiones ANTIGUAS de la app programaban el
+  /// aviso de "suena en 30 minutos" como ALARMA nativa (`Alarm.set`).
+  ///
+  /// Coincide en valor con [RecordatorioService.offsetNotificacion], pero es
+  /// una cosa distinta: aquel identifica notificaciones locales del
+  /// planificador y este identifica alarmas nativas heredadas que hay que
+  /// purgar. No los unifiques: si algún día cambia el offset de las
+  /// notificaciones, el de las alarmas heredadas debe seguir siendo 10000
+  /// para poder limpiar las instalaciones antiguas.
+  static const int offsetAlarmaRecordatorioHeredado = 10000;
+
   /// Tiempo tras el cual la alarma vuelve a sonar cuando el usuario cierra la
   /// pantalla con "confirmación de despertar", para asegurar que despertó.
   static const Duration duracionConfirmacion = Duration(seconds: 30);
@@ -127,7 +151,17 @@ class AlarmasPresenter {
   /// puede evitarlo.
   Future<void> iniciar() async {
     _log('App abierta');
-    await _alarmService.init();
+    // `init()` es lo más propenso a lanzar de todo el método (canal de
+    // plataforma + DataStore). Va en su propio try: si falla, el resto —y
+    // sobre todo el reloj y la escucha de Alarm.ringing— tienen que arrancar
+    // igual, que es justo lo que este método promete.
+    try {
+      await _alarmService.init();
+      await _purgarRecordatoriosHeredados();
+    } catch (e) {
+      _log('⚠ ERROR al inicializar el package de alarmas: $e — la app '
+          'continúa, pero programar o detener alarmas puede fallar');
+    }
     try {
       await _detectarReinicio();
       await _cargarAlarmas();
@@ -157,6 +191,31 @@ class AlarmasPresenter {
     }
     _iniciarTimer();
     _iniciarEscuchaRinging();
+    _iniciado = true;
+  }
+
+  /// Cancela las alarmas nativas que las versiones antiguas de la app crearon
+  /// para el aviso de "suena en 30 minutos" (`Alarm.set` con el ID desplazado).
+  ///
+  /// Se ejecuta justo después de `Alarm.init()`, ANTES de cualquier otra cosa,
+  /// y no dentro de [_cargarAlarmas]: al actualizar la app, `ArranqueReceiver`
+  /// puede haber rearmado uno de esos recordatorios con el `AlarmStorage` que
+  /// dejó la versión vieja. Si dispara, deja vivo el foreground service y el
+  /// `ringingAlarmIds` del package ocupado, y la alarma real de la mañana se
+  /// descarta — el bug original, una última noche. Purgar aquí cierra la
+  /// ventana que va desde la actualización hasta la primera apertura.
+  Future<void> _purgarRecordatoriosHeredados() async {
+    final nativas = await _alarmService.getAlarmasNativas();
+    for (final nativa in nativas) {
+      if (nativa.id <= offsetAlarmaRecordatorioHeredado) continue;
+      try {
+        await _alarmService.detener(nativa.id);
+        _log('Recordatorio heredado #${nativa.id} purgado: los avisos de '
+            '30 min ya no se programan como alarmas');
+      } catch (e) {
+        _log('⚠ ERROR al purgar el recordatorio heredado #${nativa.id}: $e');
+      }
+    }
   }
 
   /// Abre el ajuste del sistema para conceder el full-screen intent.
@@ -179,11 +238,22 @@ class AlarmasPresenter {
     _view.onAutostartRecomendado(recomendado);
   }
 
-  /// Abre la pantalla de Inicio automático del fabricante y da el aviso por
-  /// atendido: el sistema no expone el estado real del ajuste.
+  /// Abre la pantalla de Inicio automático del fabricante.
+  ///
+  /// El aviso solo se da por atendido si la pantalla del fabricante se abrió
+  /// de verdad. Si ninguno de los componentes OEM resuelve, el usuario acaba
+  /// en los ajustes genéricos de la app, donde no puede activar nada: ocultar
+  /// el banner ahí eliminaría en silencio la única mitigación de la causa
+  /// raíz número uno (el OEM mata el proceso y la alarma no suena).
   Future<void> abrirAutostart() async {
-    await _permissionService.abrirAutostartOEM();
+    final abierto = await _permissionService.abrirAutostartOEM();
+    if (!abierto) {
+      _log('No se pudo abrir la pantalla de Inicio automático del '
+          'fabricante: el aviso sigue pendiente');
+      return;
+    }
     await _storageService.guardarAutostartAtendido();
+    _log('Pantalla de Inicio automático abierta: aviso marcado como atendido');
     _view.onAutostartRecomendado(false);
   }
 
@@ -323,9 +393,17 @@ class AlarmasPresenter {
 
     if (alarma.diasSemana.isNotEmpty) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
-      await _alarmService.programar(alarma);
-      // Programar recordatorio para el próximo disparo recurrente.
-      await _recordatorioService.programar(alarma);
+      try {
+        await _alarmService.programar(alarma);
+        // Programar recordatorio para el próximo disparo recurrente.
+        await _recordatorioService.programar(alarma);
+      } catch (e) {
+        // Este método se invoca con `unawaited` desde el stream de ringing:
+        // sin este catch la excepción quedaría como error asíncrono suelto y
+        // la alarma ni siquiera se guardaría con su nueva hora.
+        _log('⚠ ERROR al reprogramar la alarma #${alarma.id} tras detenerse '
+            'externamente: $e');
+      }
     } else {
       alarma.activa = false;
     }
@@ -375,7 +453,35 @@ class AlarmasPresenter {
   }
 
   /// Maneja el evento de ciclo de vida cuando la app vuelve a primer plano.
+  ///
+  /// Dos guardias antes de tocar nada:
+  /// - [_iniciado]: los diálogos de permisos que abre [iniciar] provocan un
+  ///   `resumed` mientras `iniciar()` sigue en vuelo. Auditar y normalizar
+  ///   entonces trabaja sobre una lista a medio cargar y sin la escucha de
+  ///   `Alarm.ringing` montada.
+  /// - [_procesandoResume]: dos `resumed` encadenados no deben auditar a la
+  ///   vez sobre la misma lista.
   Future<void> onAppResumed() async {
+    if (!_iniciado) {
+      _log('Resume ignorado: iniciar() todavía no ha terminado');
+      return;
+    }
+    if (_procesandoResume) return;
+    _procesandoResume = true;
+    try {
+      await _procesarResume();
+    } catch (e) {
+      // La vista encadena un `.then()` a este Future (anuncio de apertura).
+      // Si la excepción escapara, ese callback no se ejecutaría nunca y el
+      // error quedaría como error de Future no capturado, sin rastro.
+      _log('⚠ ERROR al volver a primer plano: $e');
+    } finally {
+      _procesandoResume = false;
+    }
+  }
+
+  /// Cuerpo real de [onAppResumed], ya con las guardias aplicadas.
+  Future<void> _procesarResume() async {
     await _verificarModoNoMolestar();
 
     // Si _alarmaSonando no se asignó aún (race condition con el stream),
@@ -390,12 +496,17 @@ class AlarmasPresenter {
     }
 
     if (_alarmaSonando == null) {
+      // Nada sonando según nuestro estado, pero puede quedar una alarma
+      // inactiva sonando de verdad (se desactivó al normalizar y el audio
+      // sigue vivo). Se consulta al sistema para blindarla igual que en el
+      // arranque en frío.
+      final idsSonando = await _idsSonandoAhora();
       // Nada sonando: momento seguro para reparar lo que el sistema haya perdido.
       // Normalizar primero: una alarma activa vencida (el OEM canceló su
       // AlarmManager antes de disparar) debe tener su hora recalculada ANTES
       // de auditar, o la auditoría no la vería como "futura" y la ignoraría.
-      final huboCambios = _normalizarAlarmasVencidas();
-      await _auditarAlarmasProgramadas();
+      final huboCambios = _normalizarAlarmasVencidas(idsSonando: idsSonando);
+      await _auditarAlarmasProgramadas(idsSonando: idsSonando);
       if (huboCambios) {
         await _guardarAlarmas();
         _view.onAlarmaActualizada();
@@ -406,27 +517,10 @@ class AlarmasPresenter {
     final sigueSonando = await _alarmService.alarmIsRinging(_alarmaSonando!.id);
 
     if (!sigueSonando) {
-      // Detenida externamente — limpiar estado y reprogramar si es recurrente.
-      final alarma = _alarmaSonando!;
-      _alarmaSonando = null;
-      _alertaEnPantalla = false;
-      alarma.pospuesta = false;
-      alarma.confirmacionPendiente = false;
-
-      // Cancelar el recordatorio del ciclo actual.
-      await _recordatorioService.cancelar(alarma.id);
-
-      if (alarma.diasSemana.isNotEmpty) {
-        alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
-        await _alarmService.programar(alarma);
-        // Programar recordatorio para el próximo disparo recurrente.
-        await _recordatorioService.programar(alarma);
-      } else {
-        alarma.activa = false; // una sola vez: desactivar si se paró desde la notificación
-      }
-
-      await _guardarAlarmas();
-      _view.onAlarmaActualizada();
+      // Detenida externamente — misma limpieza que detecta el stream de
+      // `Alarm.ringing`; comparten método a propósito (ver #7 de la revisión:
+      // los dos bloques duplicados ya habían divergido).
+      await _limpiarAlarmaSonandoExterna(_alarmaSonando!);
       return;
     }
 
@@ -437,6 +531,25 @@ class AlarmasPresenter {
           '(la alarma seguía sonando)');
       _view.onMostrarPantallaAlarma(_alarmaSonando!);
     }
+  }
+
+  /// IDs de la lista actual cuya alarma nativa está sonando EN ESTE MOMENTO.
+  ///
+  /// Se consulta al sistema (no a nuestro estado) porque tras un arranque en
+  /// frío no hay estado: el proceso murió mientras sonaba. Se recorre toda la
+  /// lista, también las inactivas: una alarma de una sola vez que ya se
+  /// desactivó en un arranque anterior puede seguir sonando, porque
+  /// `androidStopAlarmOnTermination: false` mantiene vivo el servicio.
+  Future<Set<int>> _idsSonandoAhora() async {
+    final ids = <int>{};
+    for (final alarma in _alarmas) {
+      try {
+        if (await _alarmService.alarmIsRinging(alarma.id)) ids.add(alarma.id);
+      } catch (e) {
+        _log('⚠ ERROR al consultar si la alarma #${alarma.id} suena: $e');
+      }
+    }
+    return ids;
   }
 
   /// Abre la pantalla de alarma a petición del banner de foreground.
@@ -458,22 +571,48 @@ class AlarmasPresenter {
   /// Las huérfanas se calculan contra TODAS las activas, sin filtrar por hora
   /// futura, para no cancelar una alarma que está sonando ahora mismo.
   ///
+  /// [idsSonando] son las alarmas que el sistema reporta sonando AHORA. Se
+  /// excluyen del barrido de huérfanas pase lo que pase, incluso si ya no
+  /// figuran como activas: en el segundo arranque en frío de una alarma de
+  /// una sola vez, la normalización del arranque anterior la dejó
+  /// `activa = false` y persistida, pero su alarma nativa sigue sonando
+  /// (solo se desregistra con `Alarm.stop`). Sin esta exclusión se clasifica
+  /// como huérfana y se silencia. También se excluyen de la reparación:
+  /// `programar()` ejecuta `Alarm.set`, que empieza por `Alarm.stop` sobre el
+  /// mismo id y mataría el audio.
+  ///
+  /// Cada operación va en su propio try/catch: una alarma que lance no debe
+  /// impedir que las demás se auditen o se repongan.
+  ///
   /// Devuelve los IDs que faltaban.
-  Future<Set<int>> _auditarAlarmasProgramadas() async {
+  Future<Set<int>> _auditarAlarmasProgramadas({
+    Set<int> idsSonando = const {},
+  }) async {
     final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
     final ahora = DateTime.now();
-    final activasFuturas =
-        _alarmas.where((a) => a.activa && a.hora.isAfter(ahora)).toList();
+    final activasFuturas = _alarmas
+        .where((a) =>
+            a.activa && a.hora.isAfter(ahora) && !idsSonando.contains(a.id))
+        .toList();
 
     final alarmasNativas = await _alarmService.getAlarmasNativas();
     final idsNativas = alarmasNativas.map((n) => n.id).toSet();
 
     for (final nativa in alarmasNativas) {
       if (idsActivas.contains(nativa.id)) continue;
-      await _alarmService.detener(nativa.id);
-      if (nativa.id > RecordatorioService.offsetNotificacion) {
-        _log('Recordatorio antiguo #${nativa.id} cancelado: los recordatorios '
-            'ya no se programan como alarmas');
+      if (idsSonando.contains(nativa.id)) {
+        _log('Alarma #${nativa.id} suena ahora mismo: se respeta aunque ya no '
+            'figure como activa (la gestionará el usuario al atenderla)');
+        continue;
+      }
+      try {
+        await _alarmService.detener(nativa.id);
+        if (nativa.id > offsetAlarmaRecordatorioHeredado) {
+          _log('Recordatorio antiguo #${nativa.id} cancelado: los recordatorios '
+              'ya no se programan como alarmas');
+        }
+      } catch (e) {
+        _log('⚠ ERROR al cancelar la alarma huérfana #${nativa.id}: $e');
       }
     }
 
@@ -487,8 +626,14 @@ class AlarmasPresenter {
       _log('⚠ Auditoría: alarma(s) $faltantes FALTABAN en el sistema '
           '(posible reinicio o cancelación por el OEM). Reprogramando…');
       for (final alarma in activasFuturas.where((a) => faltantes.contains(a.id))) {
-        await _alarmService.programar(alarma);
-        await _recordatorioService.programar(alarma);
+        try {
+          await _alarmService.programar(alarma);
+          await _recordatorioService.programar(alarma);
+        } catch (e) {
+          _log('⚠ ERROR al reponer la alarma #${alarma.id} '
+              '"${alarma.etiqueta}" en la auditoría: $e — se continúa con '
+              'las demás');
+        }
       }
     }
 
@@ -522,12 +667,20 @@ class AlarmasPresenter {
   ///   (reprogramar activas con hora futura) cubre el reprogramado de las
   ///   vencidas recurrentes que la normalización acaba de recalcular.
   ///
+  /// [idsSonando] son las alarmas que el sistema reporta sonando AHORA: se
+  /// dejan intactas. Recalcular la hora de una alarma que suena la volvería
+  /// "futura" y el bucle de reprogramación de [_cargarAlarmas] la pasaría por
+  /// `Alarm.set`, que empieza deteniéndola y mata el audio; desactivar una de
+  /// una sola vez la convierte en huérfana para el siguiente arranque. De
+  /// ambos casos ya se encarga [detenerAlarma] cuando el usuario la atiende.
+  ///
   /// Devuelve true si se modificó alguna alarma.
-  bool _normalizarAlarmasVencidas() {
+  bool _normalizarAlarmasVencidas({Set<int> idsSonando = const {}}) {
     final ahora = DateTime.now();
     var huboCambios = false;
 
     for (final alarma in _alarmas) {
+      if (idsSonando.contains(alarma.id)) continue;
       if (alarma.activa && alarma.hora.isBefore(ahora)) {
         // Limpiar confirmación vencida independientemente del tipo
         alarma.confirmacionPendiente = false; // ← NUEVO
@@ -554,21 +707,46 @@ class AlarmasPresenter {
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
 
+    // Averiguar PRIMERO qué está sonando ahora mismo. Puede haber una alarma
+    // sonando en un arranque en frío: el proceso murió (o nunca existió) y el
+    // full-screen intent acaba de lanzar la activity. Esas alarmas se saltan
+    // por completo — ni se auditan, ni se normalizan, ni se reprograman —
+    // porque cualquiera de las tres cosas acaba llamando a `Alarm.stop` sobre
+    // ellas y apagando el audio a los 2-4 segundos, sin pantalla ninguna
+    // (el `_ringing.removeById` del package ocurre antes de que
+    // _iniciarEscuchaRinging() se suscriba, así que _onAlarmaSonando ni se
+    // entera). Las gestionan _onAlarmaSonando / detenerAlarma a su tiempo.
+    final idsSonando = await _idsSonandoAhora();
+    if (idsSonando.isNotEmpty) {
+      _log('Arranque con alarma(s) $idsSonando SONANDO: se dejan intactas '
+          '(no se auditan, normalizan ni reprograman)');
+    }
+
     // Auditar ANTES de normalizar: si una alarma de una sola vez sigue
     // sonando (hora ya vencida, activa == true) porque el OEM mató el
     // proceso mientras sonaba, auditar primero la mantiene contando como
     // "activa" y evita que la huérfana la cancele y silencie el audio. Ver
     // el comentario de _normalizarAlarmasVencidas para el detalle completo.
-    await _auditarAlarmasProgramadas();
-    final huboCambios = _normalizarAlarmasVencidas();
+    await _auditarAlarmasProgramadas(idsSonando: idsSonando);
+    final huboCambios = _normalizarAlarmasVencidas(idsSonando: idsSonando);
 
     final ahora = DateTime.now();
 
     for (final alarma in _alarmas) {
+      if (idsSonando.contains(alarma.id)) continue;
       if (alarma.activa && alarma.hora.isAfter(ahora)) {
-        await _alarmService.programar(alarma);
-        // Reprogramar recordatorio si quedan más de 30 minutos.
-        await _recordatorioService.programar(alarma);
+        // Try/catch por alarma: si la #1 lanza (canal nativo, id inválido…)
+        // las #2..#N tienen que programarse igual. Sin esto, el catch de
+        // iniciar() se traga el error y la app parece sana con todas las
+        // alarmas siguientes sin programar.
+        try {
+          await _alarmService.programar(alarma);
+          // Reprogramar recordatorio si quedan más de 30 minutos.
+          await _recordatorioService.programar(alarma);
+        } catch (e) {
+          _log('⚠ ERROR al reprogramar la alarma #${alarma.id} '
+              '"${alarma.etiqueta}" al cargar: $e — se continúa con las demás');
+        }
       }
     }
 

@@ -22,6 +22,10 @@ class FakeAlarmService extends AlarmService {
   final Set<int> sonandoIds = {};
   List<AlarmSettings> alarmasNativas = [];
 
+  /// IDs cuya programación lanza, para simular un fallo del canal nativo en
+  /// una alarma concreta sin afectar a las demás.
+  final Set<int> idsQueFallanAlProgramar = {};
+
   final StreamController<AlarmSet> ringingController = StreamController<AlarmSet>.broadcast();
 
   @override
@@ -29,6 +33,9 @@ class FakeAlarmService extends AlarmService {
 
   @override
   Future<void> programar(Alarma alarma) async {
+    if (idsQueFallanAlProgramar.contains(alarma.id)) {
+      throw StateError('fallo simulado al programar #${alarma.id}');
+    }
     programadas.removeWhere((a) => a.id == alarma.id);
     programadas.add(alarma.copyWith());
   }
@@ -123,10 +130,23 @@ class FakePermissionService extends PermissionService {
   Future<void> solicitarPermisoNotificaciones() async {}
   @override
   Future<void> verificarYSolicitarPermisoAlarmasExactas() async {}
+
+  /// Controla si la app aparece como exenta de optimización de batería.
+  /// Con false, `iniciar()` llama a [solicitarExencionBateria], que en un
+  /// dispositivo real abre un diálogo del sistema (y provoca un `resumed`).
+  bool exentoBateria = true;
+
+  /// Se ejecuta dentro de [solicitarExencionBateria]. Simula lo que ocurre al
+  /// cerrar el diálogo del sistema a mitad de `iniciar()`.
+  Future<void> Function()? alSolicitarExencionBateria;
+
   @override
-  Future<bool> verificarExencionBateria() async => true;
+  Future<bool> verificarExencionBateria() async => exentoBateria;
   @override
-  Future<void> solicitarExencionBateria() async {}
+  Future<void> solicitarExencionBateria() async {
+    final gancho = alSolicitarExencionBateria;
+    if (gancho != null) await gancho();
+  }
 
   /// Controla si el fabricante simulado mata apps de forma agresiva.
   bool fabricanteAgresivo = false;
@@ -144,8 +164,13 @@ class FakePermissionService extends PermissionService {
     return fabricanteAgresivo;
   }
 
+  /// Simula si alguno de los componentes OEM de "Inicio automático" resolvió.
+  /// Con false el usuario acaba en los ajustes genéricos sin ver la pantalla
+  /// del fabricante, así que el aviso NO debe darse por atendido.
+  bool autostartSeAbre = true;
+
   @override
-  Future<void> abrirAutostartOEM() async {}
+  Future<bool> abrirAutostartOEM() async => autostartSeAbre;
 }
 
 class FakeView implements AlarmasView {
@@ -1143,6 +1168,228 @@ void main() {
       expect(view.ultimaAlarmaForeground, isNotNull,
           reason: 'La suscripción al stream de alarmas debe seguir activa '
               'aunque el bloque de permisos haya fallado');
+    });
+  });
+
+  // ── arranque en frío con una alarma SONANDO ────────────────────────────────
+
+  group('arranque en frío con una alarma sonando', () {
+    // Crea un segundo presenter sobre el MISMO storage y el MISMO servicio de
+    // alarmas: simula que el proceso murió y la app se vuelve a abrir.
+    Future<void> rearrancar() async {
+      presenter.dispose();
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: FakePermissionService(),
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      await presenter.iniciar();
+    }
+
+    test('una alarma RECURRENTE sonando no se reprograma ni se detiene', () async {
+      // La alarma sonó a las 06:00 con el proceso muerto; el full-screen intent
+      // reabre la app. Su `hora` ya venció pero el audio sigue sonando.
+      final a = _alarmaSimple(id: 60, activa: true, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
+      a.hora = DateTime(2020, 1, 1, 6, 0);
+      alarm.alarmasNativas = [_settingsDummy(60)];
+      alarm.sonandoIds.add(60);
+
+      await arrancar(alarmas: [a]);
+
+      expect(alarm.detenidas, isNot(contains(60)),
+          reason: 'Detener una alarma que suena mata su audio');
+      expect(alarm.programadas.where((p) => p.id == 60), isEmpty,
+          reason: 'programar() ejecuta Alarm.set, que empieza por Alarm.stop '
+              'sobre el mismo id: eso apaga el foreground service y silencia '
+              'la alarma que el usuario todavía no ha atendido');
+      expect(presenter.alarmas.first.hora, DateTime(2020, 1, 1, 6, 0),
+          reason: 'Tampoco debe normalizarse su hora mientras suena: de eso '
+              'se encarga detenerAlarma cuando el usuario la atienda');
+    });
+
+    test('una alarma de UNA SOLA VEZ sonando no se reprograma ni se detiene',
+        () async {
+      final a = _alarmaSimple(id: 61, activa: true, diasSemana: []);
+      a.hora = DateTime(2020, 1, 1, 6, 0);
+      alarm.alarmasNativas = [_settingsDummy(61)];
+      alarm.sonandoIds.add(61);
+
+      await arrancar(alarmas: [a]);
+
+      expect(alarm.detenidas, isNot(contains(61)));
+      expect(alarm.programadas.where((p) => p.id == 61), isEmpty);
+      expect(presenter.alarmas.first.activa, isTrue,
+          reason: 'Mientras suena no se normaliza: desactivarla y persistirlo '
+              'la convierte en huérfana para el siguiente arranque');
+    });
+
+    test('una alarma de UNA SOLA VEZ sigue a salvo en un SEGUNDO arranque en frío',
+        () async {
+      final a = _alarmaSimple(id: 62, activa: true, diasSemana: []);
+      a.hora = DateTime(2020, 1, 1, 6, 0);
+      alarm.alarmasNativas = [_settingsDummy(62)];
+      alarm.sonandoIds.add(62);
+
+      await arrancar(alarmas: [a]);
+      expect(alarm.detenidas, isNot(contains(62)));
+
+      // MIUI relanza la activity (o el usuario quita la app de Recientes y
+      // toca la notificación): el proceso arranca otra vez y la alarma SIGUE
+      // sonando, porque androidStopAlarmOnTermination es false.
+      await rearrancar();
+
+      expect(alarm.detenidas, isNot(contains(62)),
+          reason: 'En el segundo arranque la alarma ya no figura como activa '
+              'en storage; sin la protección de "está sonando ahora" la '
+              'auditoría la clasificaría como huérfana y la silenciaría');
+      expect(alarm.programadas.where((p) => p.id == 62), isEmpty);
+    });
+
+    test('una alarma que NO suena sí se reprograma en el mismo arranque', () async {
+      final sonando = _alarmaSimple(id: 63, activa: true, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
+      sonando.hora = DateTime(2020, 1, 1, 6, 0);
+      final normal = _alarmaSimple(id: 64, activa: true, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
+      normal.hora = DateTime(2020, 1, 1, 7, 0);
+      alarm.alarmasNativas = [_settingsDummy(63)];
+      alarm.sonandoIds.add(63);
+
+      await arrancar(alarmas: [sonando, normal]);
+
+      expect(alarm.programadas.map((p) => p.id), contains(64),
+          reason: 'Saltarse la que suena no debe saltarse las demás');
+    });
+  });
+
+  // ── un programar() roto no debe arrastrar a las demás ──────────────────────
+
+  group('tolerancia a fallos al programar', () {
+    test('un fallo al cargar no impide programar el resto de alarmas', () async {
+      final rota = _alarmaSimple(id: 70, diasSemana: [1, 2, 3, 4, 5]);
+      final sana = _alarmaSimple(id: 71, diasSemana: [1, 2, 3, 4, 5]);
+      rota.hora = DateTime.now().add(const Duration(hours: 1));
+      sana.hora = DateTime.now().add(const Duration(hours: 2));
+      alarm.idsQueFallanAlProgramar.add(70);
+
+      await arrancar(alarmas: [rota, sana]);
+
+      expect(alarm.programadas.map((p) => p.id), contains(71),
+          reason: 'La alarma #70 lanza; sin try/catch por alarma, la #71 '
+              'nunca llegaría a programarse');
+      expect(eventosLog.any((l) => l.contains('#70')), isTrue,
+          reason: 'El fallo debe quedar registrado en el diagnóstico');
+    });
+
+    test('un fallo en la auditoría no impide reparar el resto', () async {
+      final rota = _alarmaSimple(id: 72, diasSemana: [1, 2, 3, 4, 5]);
+      final sana = _alarmaSimple(id: 73, diasSemana: [1, 2, 3, 4, 5]);
+      rota.hora = DateTime.now().add(const Duration(hours: 1));
+      sana.hora = DateTime.now().add(const Duration(hours: 2));
+      await arrancar(alarmas: [rota, sana]);
+
+      // El sistema perdió ambas y la #72 falla al reprogramarse.
+      alarm.alarmasNativas = [];
+      alarm.programadas.clear();
+      alarm.idsQueFallanAlProgramar.add(72);
+
+      await presenter.onAppResumed();
+
+      expect(alarm.programadas.map((p) => p.id), contains(73),
+          reason: 'Sin try/catch por alarma la excepción escapa de '
+              'onAppResumed como error de Future no capturado');
+    });
+  });
+
+  // ── reentrada de onAppResumed ──────────────────────────────────────────────
+
+  group('reentrada de onAppResumed', () {
+    // Cada ejecución de _auditarAlarmasProgramadas deja exactamente una línea
+    // "Auditoría:" en el log, así que contarlas cuenta auditorías reales.
+    int auditorias() =>
+        eventosLog.where((e) => e.contains('Auditoría')).length;
+
+    test('un resume durante iniciar() no audita a medias', () async {
+      final permisos = FakePermissionService()..exentoBateria = false;
+      storage.precargar([_alarmaSimple(id: 80, diasSemana: [1, 2, 3, 4, 5])]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      // El diálogo del sistema de exención de batería se cierra y llega
+      // `resumed` mientras iniciar() sigue en vuelo.
+      permisos.alSolicitarExencionBateria = () => presenter.onAppResumed();
+
+      await presenter.iniciar();
+
+      expect(auditorias(), 1,
+          reason: 'Solo debe auditar _cargarAlarmas; un onAppResumed '
+              'reentrante auditaría por segunda vez sobre un estado a medio '
+              'construir, con el mismo riesgo de cancelar como huérfana una '
+              'alarma que está sonando');
+    });
+
+    test('dos onAppResumed simultáneos auditan una sola vez', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 81, diasSemana: [1, 2, 3, 4, 5])]);
+      final antes = auditorias();
+
+      await Future.wait([presenter.onAppResumed(), presenter.onAppResumed()]);
+
+      expect(auditorias(), antes + 1,
+          reason: 'La guardia de reentrada debe descartar el segundo resume');
+    });
+  });
+
+  // ── Inicio automático: el aviso solo se atiende si se abrió de verdad ──────
+
+  group('Inicio automático — aviso atendido', () {
+    Future<FakePermissionService> arrancarConAutostart({
+      required bool seAbre,
+    }) async {
+      final permisos = FakePermissionService()
+        ..fabricanteAgresivo = true
+        ..autostartSeAbre = seAbre;
+      storage.precargar([]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      await presenter.iniciar();
+      return permisos;
+    }
+
+    test('si no se abrió ninguna pantalla del fabricante el aviso sigue vivo',
+        () async {
+      await arrancarConAutostart(seAbre: false);
+      expect(view.autostartRecomendado, isTrue);
+
+      await presenter.abrirAutostart();
+
+      expect(await storage.cargarAutostartAtendido(), isFalse,
+          reason: 'Sin pantalla del fabricante el usuario no pudo activar '
+              'nada: dar el aviso por atendido elimina en silencio la única '
+              'mitigación de la causa raíz');
+      expect(view.autostartRecomendado, isTrue,
+          reason: 'El banner debe seguir visible para reintentarlo');
+    });
+
+    test('si se abrió la pantalla del fabricante el aviso queda atendido',
+        () async {
+      await arrancarConAutostart(seAbre: true);
+
+      await presenter.abrirAutostart();
+
+      expect(await storage.cargarAutostartAtendido(), isTrue);
+      expect(view.autostartRecomendado, isFalse);
     });
   });
 }

@@ -121,12 +121,18 @@ class PermissionService {
   /// Sin esto, dispositivos Xiaomi/Huawei/Oppo matan el proceso y las alarmas
   /// no suenan. No hay forma de activarlo programáticamente: solo se abre la
   /// pantalla y se instruye al usuario.
-  Future<void> abrirAutostartOEM() async {
-    if (!Platform.isAndroid) return;
+  ///
+  /// Devuelve true solo si se abrió una pantalla REAL del fabricante. Con
+  /// false el usuario acabó en los ajustes genéricos de la app (o no se abrió
+  /// nada) y el aviso no debe darse por atendido.
+  Future<bool> abrirAutostartOEM() async {
+    if (!Platform.isAndroid) return false;
     try {
-      await _canalSistema.invokeMethod('abrirAutostartOEM');
+      return await _canalSistema.invokeMethod<bool>('abrirAutostartOEM') ??
+          false;
     } on PlatformException {
       await openAppSettings();
+      return false;
     }
   }
 
