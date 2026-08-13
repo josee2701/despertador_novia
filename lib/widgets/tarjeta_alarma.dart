@@ -226,15 +226,15 @@ class TarjetaAlarma extends StatelessWidget {
   }
 
   /// Verifica si la alarma está programada para hoy.
+  ///
+  /// Se compara contra `alarma.hora` (el próximo disparo real) en vez de
+  /// recalcular con `proximaFecha`, que siempre devuelve una fecha futura y
+  /// pintaría "HOY" sobre alarmas desactivadas o ya vencidas.
   bool _esParaHoy() {
+    if (!alarma.activa) return false;
     final ahora = DateTime.now();
-    final proximoDisparo = proximaFecha(
-      alarma.horaDelDia,
-      alarma.minutoDelDia,
-      alarma.diasSemana,
-    );
-    return proximoDisparo.year == ahora.year &&
-        proximoDisparo.month == ahora.month &&
-        proximoDisparo.day == ahora.day;
+    return alarma.hora.year == ahora.year &&
+        alarma.hora.month == ahora.month &&
+        alarma.hora.day == ahora.day;
   }
 }
