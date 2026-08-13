@@ -897,4 +897,49 @@ void main() {
           reason: 'Tras abrir desde el banner no debe apilarse una segunda ruta');
     });
   });
+
+  // ── auditoría al volver a primer plano ─────────────────────────────────────
+
+  group('auditoría en onAppResumed', () {
+    test('reprograma una alarma que el sistema perdió', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 4, diasSemana: [1, 2, 3, 4, 5])]);
+
+      // El sistema ya no tiene la alarma (reinicio, OEM, force stop).
+      alarm.alarmasNativas = [];
+      alarm.programadas.clear();
+      recordatorio.programados.clear();
+
+      await presenter.onAppResumed();
+
+      expect(alarm.programadas.map((a) => a.id), contains(4));
+      expect(recordatorio.programados, contains(4));
+      expect(eventosLog.any((l) => l.contains('FALTABAN')), isTrue);
+    });
+
+    test('no toca nada si todas las alarmas siguen programadas', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 5, diasSemana: [1, 2, 3, 4, 5])]);
+
+      alarm.alarmasNativas = [_settingsDummy(5)];
+      alarm.programadas.clear();
+      alarm.detenidas.clear();
+
+      await presenter.onAppResumed();
+
+      expect(alarm.programadas, isEmpty,
+          reason: 'No debe reprogramarse lo que ya está en el sistema');
+      expect(alarm.detenidas, isEmpty);
+    });
+
+    test('no audita mientras una alarma está sonando', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 6, diasSemana: [])]);
+      alarm.sonandoIds.add(6);
+      alarm.alarmasNativas = [];
+      alarm.detenidas.clear();
+
+      await presenter.onAppResumed();
+
+      expect(alarm.detenidas, isEmpty,
+          reason: 'Auditar con una alarma sonando podría silenciarla');
+    });
+  });
 }

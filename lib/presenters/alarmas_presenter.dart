@@ -349,7 +349,11 @@ class AlarmasPresenter {
       }
     }
 
-    if (_alarmaSonando == null) return;
+    if (_alarmaSonando == null) {
+      // Nada sonando: momento seguro para reparar lo que el sistema haya perdido.
+      await _auditarAlarmasProgramadas();
+      return;
+    }
 
     final sigueSonando = await _alarmService.alarmIsRinging(_alarmaSonando!.id);
 
@@ -397,6 +401,52 @@ class AlarmasPresenter {
     _view.onMostrarPantallaAlarma(alarma);
   }
 
+  /// Compara lo que DEBERÍA estar programado con lo que el sistema tiene.
+  ///
+  /// - Huérfanas (en el sistema pero no en nuestra lista activa) → se cancelan.
+  /// - Faltantes (activas y futuras pero ausentes del sistema) → se perdieron
+  ///   por un reinicio o porque el OEM canceló el AlarmManager; se reprograman.
+  ///
+  /// Las huérfanas se calculan contra TODAS las activas, sin filtrar por hora
+  /// futura, para no cancelar una alarma que está sonando ahora mismo.
+  ///
+  /// Devuelve los IDs que faltaban.
+  Future<Set<int>> _auditarAlarmasProgramadas() async {
+    final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
+    final ahora = DateTime.now();
+    final activasFuturas =
+        _alarmas.where((a) => a.activa && a.hora.isAfter(ahora)).toList();
+
+    final alarmasNativas = await _alarmService.getAlarmasNativas();
+    final idsNativas = alarmasNativas.map((n) => n.id).toSet();
+
+    for (final nativa in alarmasNativas) {
+      if (idsActivas.contains(nativa.id)) continue;
+      await _alarmService.detener(nativa.id);
+      if (nativa.id > RecordatorioService.offsetNotificacion) {
+        _log('Recordatorio antiguo #${nativa.id} cancelado: los recordatorios '
+            'ya no se programan como alarmas');
+      }
+    }
+
+    final faltantes =
+        activasFuturas.map((a) => a.id).toSet().difference(idsNativas);
+
+    if (faltantes.isEmpty) {
+      _log('Auditoría: ${idsActivas.length} alarma(s) activa(s), '
+          'todas presentes en el sistema. OK');
+    } else {
+      _log('⚠ Auditoría: alarma(s) $faltantes FALTABAN en el sistema '
+          '(posible reinicio o cancelación por el OEM). Reprogramando…');
+      for (final alarma in activasFuturas.where((a) => faltantes.contains(a.id))) {
+        await _alarmService.programar(alarma);
+        await _recordatorioService.programar(alarma);
+      }
+    }
+
+    return faltantes;
+  }
+
   /// Carga las alarmas desde almacenamiento persistente.
   ///
   /// Si encuentra alarmas vencidas (incluyendo snoozes expirados), recalcula
@@ -407,32 +457,7 @@ class AlarmasPresenter {
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
 
-    // Auditoría al abrir: comparar las alarmas que DEBERÍAN estar programadas
-    // (activas en nuestra lista) con las que el sistema tiene realmente.
-    // - Huérfanas (en el sistema pero no en la lista) → se cancelan.
-    // - Faltantes (en la lista pero NO en el sistema) → se perdieron (reinicio
-    //   o el OEM canceló el AlarmManager); se reprograman más abajo. Esto deja
-    //   en el log evidencia inequívoca de pérdidas silenciosas.
-    final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
-    final alarmasNativas = await _alarmService.getAlarmasNativas();
-    final idsNativas = alarmasNativas.map((n) => n.id).toSet();
-    for (final nativa in alarmasNativas) {
-      if (!idsActivas.contains(nativa.id)) {
-        await _alarmService.detener(nativa.id);
-        if (nativa.id > RecordatorioService.offsetNotificacion) {
-          _log('Recordatorio antiguo #${nativa.id} cancelado: los recordatorios '
-              'ya no se programan como alarmas');
-        }
-      }
-    }
-    final faltantes = idsActivas.difference(idsNativas);
-    if (faltantes.isEmpty) {
-      _log('Auditoría al abrir: ${idsActivas.length} alarma(s) activa(s), '
-          'todas presentes en el sistema. OK');
-    } else {
-      _log('⚠ Auditoría al abrir: alarma(s) $faltantes FALTABAN en el sistema '
-          '(posible reinicio o cancelación por el OEM). Reprogramando…');
-    }
+    await _auditarAlarmasProgramadas();
 
     final ahora = DateTime.now();
     var huboCambios = false;
