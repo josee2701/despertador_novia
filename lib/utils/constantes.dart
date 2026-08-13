@@ -13,3 +13,7 @@ const claveNextId = 'nextId';
 /// anterior. Si el uptime actual es MENOR, hubo un reinicio entre sesiones:
 /// las alarmas pudieron perderse si el OEM no entregó BOOT_COMPLETED.
 const claveUltimoUptime = 'ultimoUptimeMs';
+
+/// Canal de notificaciones del aviso "tu alarma suena en 30 minutos".
+/// Silencioso a propósito: dispara de madrugada y no debe despertar a nadie.
+const canalRecordatorios = 'recordatorios';
