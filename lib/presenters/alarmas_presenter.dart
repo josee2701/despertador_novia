@@ -25,6 +25,7 @@ abstract class AlarmasView {
   void onPermisoNecesario(bool necesita);
   void onModoNoMolestarCambiado(bool activo);
   void onFullScreenIntentDenegado(bool denegado);
+  void onAutostartRecomendado(bool recomendado);
   void onMostrarPantallaAlarma(Alarma alarma);
   void onAlarmaSonandoEnForeground(Alarma alarma);
   BuildContext getContext();
@@ -138,6 +139,7 @@ class AlarmasPresenter {
     // Avisar a la vista si no puede mostrar la alarma sobre el lockscreen:
     // causa #1 de "no aparece la pantalla con el teléfono bloqueado" en Android 14+/MIUI.
     _view.onFullScreenIntentDenegado(!estado.fullScreenIntent);
+    await _verificarAutostart();
     _iniciarTimer();
     _iniciarEscuchaRinging();
   }
@@ -145,6 +147,29 @@ class AlarmasPresenter {
   /// Abre el ajuste del sistema para conceder el full-screen intent.
   Future<void> abrirAjustesFullScreenIntent() async {
     await _permissionService.abrirAjustesFullScreenIntent();
+  }
+
+  /// Avisa a la vista si conviene enseñar la guía de Inicio automático.
+  ///
+  /// Solo en fabricantes que matan apps de forma agresiva (Xiaomi, Huawei…) y
+  /// solo mientras el usuario no la haya atendido.
+  Future<void> _verificarAutostart() async {
+    final agresivo = await _permissionService.esFabricanteAgresivo();
+    final atendido = await _storageService.cargarAutostartAtendido();
+    final recomendado = agresivo && !atendido;
+    if (recomendado) {
+      _log('Fabricante agresivo detectado: se recomienda activar el '
+          'Inicio automático');
+    }
+    _view.onAutostartRecomendado(recomendado);
+  }
+
+  /// Abre la pantalla de Inicio automático del fabricante y da el aviso por
+  /// atendido: el sistema no expone el estado real del ajuste.
+  Future<void> abrirAutostart() async {
+    await _permissionService.abrirAutostartOEM();
+    await _storageService.guardarAutostartAtendido();
+    _view.onAutostartRecomendado(false);
   }
 
   /// Detecta si el dispositivo se reinició desde la última sesión comparando el

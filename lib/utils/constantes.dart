@@ -17,3 +17,8 @@ const claveUltimoUptime = 'ultimoUptimeMs';
 /// Canal de notificaciones del aviso "tu alarma suena en 30 minutos".
 /// Silencioso a propósito: dispara de madrugada y no debe despertar a nadie.
 const canalRecordatorios = 'recordatorios';
+
+/// Marca que el usuario ya pasó por la pantalla de "Inicio automático" del
+/// fabricante. No hay forma de consultar el estado real del ajuste, así que se
+/// guarda que el aviso fue atendido para no repetirlo.
+const claveAutostartAtendido = 'autostartAtendido';

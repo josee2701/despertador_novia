@@ -34,6 +34,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   late final AppOpenAdManager _appOpenAd;
   bool _modoNoMolestar = false;
   bool _fullScreenDenegado = false;
+  bool _autostartRecomendado = false;
   bool _animarFAB = false;
   Alarma? _alarmaRinging;
 
@@ -137,6 +138,11 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   @override
   void onFullScreenIntentDenegado(bool denegado) {
     if (mounted) setState(() => _fullScreenDenegado = denegado);
+  }
+
+  @override
+  void onAutostartRecomendado(bool recomendado) {
+    if (mounted) setState(() => _autostartRecomendado = recomendado);
   }
 
   @override
@@ -476,6 +482,15 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                   'aparecer con el teléfono bloqueado',
               textoBoton: 'Conceder',
               onPressed: () => _presenter.abrirAjustesFullScreenIntent(),
+            ),
+
+          // ── Advertencia Inicio automático (Xiaomi, Huawei, Oppo…) ──
+          if (_autostartRecomendado)
+            _bannerAdvertencia(
+              texto: 'Tu teléfono puede cerrar la app y cancelar las alarmas. '
+                  'Activa el Inicio automático',
+              textoBoton: 'Activar',
+              onPressed: () => _presenter.abrirAutostart(),
             ),
 
           // ── Lista de alarmas ──

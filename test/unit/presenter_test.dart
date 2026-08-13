@@ -88,6 +88,14 @@ class FakeStorageService extends StorageService {
   Future<({List<Alarma> alarmas, int nextId})> cargarAlarmas() async {
     return (alarmas: _alarmas.map((a) => a.copyWith()).toList(), nextId: _nextId);
   }
+
+  bool _autostartAtendido = false;
+
+  @override
+  Future<void> guardarAutostartAtendido() async => _autostartAtendido = true;
+
+  @override
+  Future<bool> cargarAutostartAtendido() async => _autostartAtendido;
 }
 
 class FakePermissionService extends PermissionService {
@@ -119,6 +127,15 @@ class FakePermissionService extends PermissionService {
   Future<bool> verificarExencionBateria() async => true;
   @override
   Future<void> solicitarExencionBateria() async {}
+
+  /// Controla si el fabricante simulado mata apps de forma agresiva.
+  bool fabricanteAgresivo = false;
+
+  @override
+  Future<bool> esFabricanteAgresivo() async => fabricanteAgresivo;
+
+  @override
+  Future<void> abrirAutostartOEM() async {}
 }
 
 class FakeView implements AlarmasView {
@@ -150,6 +167,10 @@ class FakeView implements AlarmasView {
   void onMostrarPantallaAlarma(Alarma alarma) => ultimaAlarmaRinging = alarma;
   @override
   void onAlarmaSonandoEnForeground(Alarma alarma) => ultimaAlarmaForeground = alarma;
+  bool autostartRecomendado = false;
+  @override
+  void onAutostartRecomendado(bool recomendado) =>
+      autostartRecomendado = recomendado;
   @override
   BuildContext getContext() => throw UnimplementedError();
 }
@@ -999,6 +1020,67 @@ void main() {
           reason:
               'Una alarma de una sola vez vencida debe desactivarse, no reprogramarse');
       expect(alarm.programadas.where((a) => a.id == 8), isEmpty);
+    });
+  });
+
+  // ── guía de Inicio automático (OEM agresivos) ──────────────────────────────
+
+  group('Inicio automático OEM', () {
+    test('se recomienda en fabricante agresivo sin atender', () async {
+      final permisos = FakePermissionService()..fabricanteAgresivo = true;
+      storage.precargar([]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      await presenter.iniciar();
+
+      expect(view.autostartRecomendado, isTrue);
+    });
+
+    test('no se recomienda si ya se atendió', () async {
+      final permisos = FakePermissionService()..fabricanteAgresivo = true;
+      storage.precargar([]);
+      await storage.guardarAutostartAtendido();
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      await presenter.iniciar();
+
+      expect(view.autostartRecomendado, isFalse);
+    });
+
+    test('no se recomienda en fabricantes no agresivos', () async {
+      await arrancar();
+      expect(view.autostartRecomendado, isFalse);
+    });
+
+    test('abrirAutostart marca el aviso como atendido', () async {
+      final permisos = FakePermissionService()..fabricanteAgresivo = true;
+      storage.precargar([]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      await presenter.iniciar();
+
+      await presenter.abrirAutostart();
+
+      expect(view.autostartRecomendado, isFalse);
+      expect(await storage.cargarAutostartAtendido(), isTrue);
     });
   });
 }

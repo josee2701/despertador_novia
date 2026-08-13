@@ -58,4 +58,16 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(claveUltimoUptime);
   }
+
+  /// Marca el aviso de Inicio automático como atendido.
+  Future<void> guardarAutostartAtendido() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(claveAutostartAtendido, true);
+  }
+
+  /// Devuelve true si el aviso de Inicio automático ya fue atendido.
+  Future<bool> cargarAutostartAtendido() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(claveAutostartAtendido) ?? false;
+  }
 }
