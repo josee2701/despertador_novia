@@ -22,3 +22,9 @@ const canalRecordatorios = 'recordatorios';
 /// fabricante. No hay forma de consultar el estado real del ajuste, así que se
 /// guarda que el aviso fue atendido para no repetirlo.
 const claveAutostartAtendido = 'autostartAtendido';
+
+/// ID del bloque App Open de AdMob para Android en producción.
+///
+/// Vacío = el anuncio de apertura queda desactivado (comportamiento seguro).
+/// Rellenar con el ID real creado en la consola de AdMob.
+const idAppOpenAdAndroid = '';

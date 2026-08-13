@@ -69,4 +69,42 @@ void main() {
       expect(m.puedeMostrar(hayAlarmaSonando: false), isTrue);
     });
   });
+
+  group('idParaPlataforma', () {
+    test('en debug devuelve el ID de prueba de Google en Android', () {
+      final id = AppOpenAdManager.idParaPlataforma(
+        esDebug: true,
+        esAndroid: true,
+        idProduccion: '',
+      );
+      expect(id, 'ca-app-pub-3940256099942544/9257395921');
+    });
+
+    test('en release con la constante vacía devuelve null', () {
+      final id = AppOpenAdManager.idParaPlataforma(
+        esDebug: false,
+        esAndroid: true,
+        idProduccion: '',
+      );
+      expect(id, isNull);
+    });
+
+    test('en release en Android devuelve el ID de producción', () {
+      final id = AppOpenAdManager.idParaPlataforma(
+        esDebug: false,
+        esAndroid: true,
+        idProduccion: 'ca-app-pub-0000000000000000/1111111111',
+      );
+      expect(id, 'ca-app-pub-0000000000000000/1111111111');
+    });
+
+    test('en release fuera de Android devuelve null', () {
+      final id = AppOpenAdManager.idParaPlataforma(
+        esDebug: false,
+        esAndroid: false,
+        idProduccion: 'ca-app-pub-0000000000000000/1111111111',
+      );
+      expect(id, isNull);
+    });
+  });
 }

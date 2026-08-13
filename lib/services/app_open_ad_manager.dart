@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import '../utils/constantes.dart';
 import 'log_service.dart';
 
 /// Gestor del App Open Ad de AdMob.
@@ -79,23 +80,43 @@ class AppOpenAdManager {
 
   // ─── Plumbing del SDK (no se prueba en unit tests) ──────────────
 
-  /// ID del bloque de anuncios. En debug usa los IDs de test oficiales de
-  /// App Open de Google; en release devuelve null hasta tener el real.
-  static String? get _adUnitId {
-    if (kDebugMode) {
-      return Platform.isAndroid
+  /// Decide qué ID de bloque usar. Puro y testeable: sin `Platform` ni
+  /// `kDebugMode` dentro, que no se pueden controlar desde un test.
+  ///
+  /// Devuelve null cuando no hay anuncio que mostrar, y entonces [cargar] no
+  /// hace nada.
+  static String? idParaPlataforma({
+    required bool esDebug,
+    required bool esAndroid,
+    required String idProduccion,
+  }) {
+    if (esDebug) {
+      return esAndroid
           ? 'ca-app-pub-3940256099942544/9257395921'
           : 'ca-app-pub-3940256099942544/5575463023';
     }
-    // TODO: reemplazar con el ID de App Open de producción de AdMob.
-    return null;
+    if (!esAndroid) return null;
+    if (idProduccion.isEmpty) return null;
+    return idProduccion;
   }
+
+  static String? get _adUnitId => idParaPlataforma(
+        esDebug: kDebugMode,
+        esAndroid: Platform.isAndroid,
+        idProduccion: idAppOpenAdAndroid,
+      );
 
   /// Precarga un anuncio. Solo tiene efecto en Android/iOS con un ID válido.
   void cargar() {
     if (!(Platform.isAndroid || Platform.isIOS)) return;
     final id = _adUnitId;
-    if (id == null) return;
+    if (id == null) {
+      unawaited(LogService.instancia.registrar(
+        'AppOpenAd desactivado: falta el ID de producción en '
+        'constantes.idAppOpenAdAndroid',
+      ));
+      return;
+    }
 
     AppOpenAd.load(
       adUnitId: id,
