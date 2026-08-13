@@ -115,31 +115,46 @@ class AlarmasPresenter {
   void _log(String evento) => _registro(evento);
 
   /// Inicializa el presenter: carga alarmas, inicia timers y verifica permisos.
+  ///
+  /// El bloque de carga/permisos/diagnóstico está envuelto en un `try/catch`
+  /// a propósito: si cualquiera de esas comprobaciones lanza algo que no sea
+  /// [PlatformException] (la única excepción que los servicios ya atrapan),
+  /// [_iniciarTimer] y [_iniciarEscuchaRinging] deben ejecutarse igual. Sin
+  /// esto, un fallo ahí abortaría `iniciar()` a mitad y la app se quedaría sin
+  /// reloj y, sobre todo, sin la suscripción a `Alarm.ringing`: ninguna
+  /// alarma volvería a mostrar su pantalla en toda la sesión. La vista solo
+  /// hace `debugPrint` en su `catchError`, así que este es el único lugar que
+  /// puede evitarlo.
   Future<void> iniciar() async {
     _log('App abierta');
     await _alarmService.init();
-    await _detectarReinicio();
-    await _cargarAlarmas();
-    await _verificarPermisoAlarmasExactas();
-    await _verificarPermisoNotificaciones();
-    await _verificarModoNoMolestar();
-    // Solicitar exención de batería si no está concedida (mejora fiabilidad en Android)
-    final exentoBateria = await _permissionService.verificarExencionBateria();
-    if (!exentoBateria) {
-      await _permissionService.solicitarExencionBateria();
+    try {
+      await _detectarReinicio();
+      await _cargarAlarmas();
+      await _verificarPermisoAlarmasExactas();
+      await _verificarPermisoNotificaciones();
+      await _verificarModoNoMolestar();
+      // Solicitar exención de batería si no está concedida (mejora fiabilidad en Android)
+      final exentoBateria = await _permissionService.verificarExencionBateria();
+      if (!exentoBateria) {
+        await _permissionService.solicitarExencionBateria();
+      }
+      // Registrar instantánea de permisos: clave para diagnosticar fallos en MIUI/Xiaomi.
+      final estado = await _permissionService.obtenerEstadoPermisos();
+      _log('Dispositivo: ${await _permissionService.descripcionDispositivo()}');
+      _log('Permisos → exactas:${estado.alarmasExactas} '
+          'notif:${estado.notificaciones} '
+          'bateria:${estado.exencionBateria} '
+          'pantallaCompleta:${estado.fullScreenIntent} '
+          'noMolestar:${estado.noMolestar}');
+      // Avisar a la vista si no puede mostrar la alarma sobre el lockscreen:
+      // causa #1 de "no aparece la pantalla con el teléfono bloqueado" en Android 14+/MIUI.
+      _view.onFullScreenIntentDenegado(!estado.fullScreenIntent);
+      await _verificarAutostart();
+    } catch (e) {
+      _log('⚠ ERROR durante el arranque: $e — la app continúa con el reloj '
+          'y la escucha de alarmas');
     }
-    // Registrar instantánea de permisos: clave para diagnosticar fallos en MIUI/Xiaomi.
-    final estado = await _permissionService.obtenerEstadoPermisos();
-    _log('Dispositivo: ${await _permissionService.descripcionDispositivo()}');
-    _log('Permisos → exactas:${estado.alarmasExactas} '
-        'notif:${estado.notificaciones} '
-        'bateria:${estado.exencionBateria} '
-        'pantallaCompleta:${estado.fullScreenIntent} '
-        'noMolestar:${estado.noMolestar}');
-    // Avisar a la vista si no puede mostrar la alarma sobre el lockscreen:
-    // causa #1 de "no aparece la pantalla con el teléfono bloqueado" en Android 14+/MIUI.
-    _view.onFullScreenIntentDenegado(!estado.fullScreenIntent);
-    await _verificarAutostart();
     _iniciarTimer();
     _iniciarEscuchaRinging();
   }

@@ -131,8 +131,18 @@ class FakePermissionService extends PermissionService {
   /// Controla si el fabricante simulado mata apps de forma agresiva.
   bool fabricanteAgresivo = false;
 
+  /// Si es true, esFabricanteAgresivo() lanza una excepción: simula un fallo
+  /// inesperado (no un PlatformException, que ya se atrapa dentro del
+  /// servicio real) durante el bloque de permisos/diagnóstico de iniciar().
+  bool lanzarErrorEnFabricanteAgresivo = false;
+
   @override
-  Future<bool> esFabricanteAgresivo() async => fabricanteAgresivo;
+  Future<bool> esFabricanteAgresivo() async {
+    if (lanzarErrorEnFabricanteAgresivo) {
+      throw Exception('fallo simulado en esFabricanteAgresivo');
+    }
+    return fabricanteAgresivo;
+  }
 
   @override
   Future<void> abrirAutostartOEM() async {}
@@ -1081,6 +1091,58 @@ void main() {
 
       expect(view.autostartRecomendado, isFalse);
       expect(await storage.cargarAutostartAtendido(), isTrue);
+    });
+  });
+
+  // ── iniciar() tolera errores en el bloque de permisos/diagnóstico ─────────
+
+  group('iniciar() tolera errores en el bloque de permisos/diagnóstico', () {
+    test('un fallo en esFabricanteAgresivo no impide arrancar el timer y queda en el log', () async {
+      final permisos = FakePermissionService()
+        ..lanzarErrorEnFabricanteAgresivo = true;
+      storage.precargar([]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+
+      await presenter.iniciar();
+
+      expect(presenter.timerActivo, isTrue,
+          reason: 'El reloj debe arrancar aunque falle una comprobación previa');
+      expect(eventosLog.any((l) => l.contains('ERROR durante el arranque')),
+          isTrue,
+          reason: 'El fallo debe quedar registrado en el log de diagnóstico');
+    });
+
+    test('la escucha de Alarm.ringing sigue activa tras ese mismo fallo', () async {
+      final permisos = FakePermissionService()
+        ..lanzarErrorEnFabricanteAgresivo = true;
+      storage.precargar([_alarmaSimple(id: 1, diasSemana: [1, 2, 3, 4, 5])]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+
+      await presenter.iniciar();
+
+      // Si _iniciarEscuchaRinging() no se llegó a ejecutar, este evento no
+      // llegaría a ningún callback de la vista.
+      alarm.sonandoIds.add(1);
+      alarm.ringingController.add(AlarmSet([_settingsDummy(1)]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(view.ultimaAlarmaForeground, isNotNull,
+          reason: 'La suscripción al stream de alarmas debe seguir activa '
+              'aunque el bloque de permisos haya fallado');
     });
   });
 }
