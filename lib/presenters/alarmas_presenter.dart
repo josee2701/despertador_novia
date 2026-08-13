@@ -259,6 +259,7 @@ class AlarmasPresenter {
       if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
         // App visible: mostrar banner no intrusivo; el fullscreen es para cuando
         // el teléfono estaba bloqueado (lo maneja onAppResumed).
+        _alertaEnPantalla = true;
         _view.onAlarmaSonandoEnForeground(alarma);
       }
       // App en segundo plano: NO hacer push de ruta ahora.
@@ -389,6 +390,16 @@ class AlarmasPresenter {
           '(la alarma seguía sonando)');
       _view.onMostrarPantallaAlarma(_alarmaSonando!);
     }
+  }
+
+  /// Abre la pantalla de alarma a petición del banner de foreground.
+  ///
+  /// La vista NO debe llamar a `onMostrarPantallaAlarma` por su cuenta: pasando
+  /// por aquí queda marcado que ya hay una alerta en pantalla y `onAppResumed`
+  /// no apila una segunda ruta con el botón atrás bloqueado.
+  void mostrarPantallaAlarmaDesdeBanner(Alarma alarma) {
+    _alertaEnPantalla = true;
+    _view.onMostrarPantallaAlarma(alarma);
   }
 
   /// Carga las alarmas desde almacenamiento persistente.

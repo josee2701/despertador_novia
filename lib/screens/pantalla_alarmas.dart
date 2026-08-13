@@ -364,7 +364,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
               onVer: () {
                 final alarma = _alarmaRinging!;
                 setState(() => _alarmaRinging = null);
-                onMostrarPantallaAlarma(alarma);
+                _presenter.mostrarPantallaAlarmaDesdeBanner(alarma);
               },
               onDetener: () {
                 final alarma = _alarmaRinging!;

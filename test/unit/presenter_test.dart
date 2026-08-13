@@ -195,6 +195,12 @@ void main() {
     alarm = FakeAlarmService();
     storage = FakeStorageService();
     eventosLog = [];
+    // El presenter consulta WidgetsBinding.instance.lifecycleState para decidir
+    // entre banner (app visible) y pantalla completa (app en segundo plano).
+    // En el entorno de test ese valor es null por defecto: se fija a "resumed"
+    // para simular la app en primer plano, como en un dispositivo real.
+    TestWidgetsFlutterBinding.instance
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   });
 
   tearDown(() {
@@ -827,6 +833,42 @@ void main() {
     test('se puede llamar sin errores', () async {
       await arrancar();
       expect(() => presenter.dispose(), returnsNormally);
+    });
+  });
+
+  // ── rutas de alarma no apiladas ────────────────────────────────────────────
+
+  group('rutas de alarma', () {
+    test('el banner de foreground impide que onAppResumed apile otra pantalla',
+        () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [1, 2, 3, 4, 5])]);
+      alarm.sonandoIds.add(1);
+
+      alarm.ringingController.add(AlarmSet([_settingsDummy(1)]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(view.ultimaAlarmaForeground, isNotNull,
+          reason: 'Con la app visible debe mostrarse el banner');
+      view.ultimaAlarmaRinging = null;
+
+      await presenter.onAppResumed();
+
+      expect(view.ultimaAlarmaRinging, isNull,
+          reason: 'La alerta ya está en pantalla: no debe empujarse otra ruta');
+    });
+
+    test('mostrarPantallaAlarmaDesdeBanner abre la pantalla una sola vez', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [1, 2, 3, 4, 5])]);
+      alarm.sonandoIds.add(1);
+
+      presenter.mostrarPantallaAlarmaDesdeBanner(presenter.alarmas.first);
+      expect(view.ultimaAlarmaRinging, isNotNull);
+
+      view.ultimaAlarmaRinging = null;
+      await presenter.onAppResumed();
+
+      expect(view.ultimaAlarmaRinging, isNull,
+          reason: 'Tras abrir desde el banner no debe apilarse una segunda ruta');
     });
   });
 }
