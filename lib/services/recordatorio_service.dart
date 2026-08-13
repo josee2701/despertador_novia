@@ -7,7 +7,7 @@ import 'planificador_notificaciones.dart';
 
 /// Programa el aviso "tu alarma suena en 30 minutos" como notificación local.
 ///
-/// Reemplaza al antiguo `AlarmService.programarRecordatorio`, que usaba
+/// Reemplaza al antiguo mecanismo de recordatorio de `AlarmService`, que usaba
 /// `Alarm.set` y acababa descartando la alarma real.
 class RecordatorioService {
   RecordatorioService({

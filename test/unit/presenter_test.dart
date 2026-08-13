@@ -9,7 +9,10 @@ import 'package:despertador_novia/models/alarma.dart';
 import 'package:despertador_novia/presenters/alarmas_presenter.dart';
 import 'package:despertador_novia/services/alarm_service.dart';
 import 'package:despertador_novia/services/permission_service.dart';
+import 'package:despertador_novia/services/recordatorio_service.dart';
 import 'package:despertador_novia/services/storage_service.dart';
+
+import 'dobles_notificaciones.dart';
 
 // ─── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -17,7 +20,6 @@ class FakeAlarmService extends AlarmService {
   final List<Alarma> programadas = [];
   final List<int> detenidas = [];
   final Set<int> sonandoIds = {};
-  final Set<int> recordatoriosProgramados = {};
   List<AlarmSettings> alarmasNativas = [];
 
   final StreamController<AlarmSet> ringingController = StreamController<AlarmSet>.broadcast();
@@ -29,16 +31,6 @@ class FakeAlarmService extends AlarmService {
   Future<void> programar(Alarma alarma) async {
     programadas.removeWhere((a) => a.id == alarma.id);
     programadas.add(alarma.copyWith());
-  }
-
-  @override
-  Future<void> programarRecordatorio(Alarma alarma) async {
-    recordatoriosProgramados.add(alarma.id + AlarmService.offsetRecordatorio);
-  }
-
-  @override
-  Future<void> cancelarRecordatorio(int alarmaId) async {
-    recordatoriosProgramados.remove(alarmaId + AlarmService.offsetRecordatorio);
   }
 
   @override
@@ -55,6 +47,24 @@ class FakeAlarmService extends AlarmService {
 
   @override
   Stream<AlarmSet> get ringingStream => ringingController.stream;
+}
+
+class FakeRecordatorioService extends RecordatorioService {
+  FakeRecordatorioService() : super(planificador: PlanificadorFalso());
+
+  final Set<int> programados = {};
+  final List<int> cancelados = [];
+
+  @override
+  Future<void> programar(Alarma alarma) async {
+    programados.add(alarma.id);
+  }
+
+  @override
+  Future<void> cancelar(int alarmaId) async {
+    programados.remove(alarmaId);
+    cancelados.add(alarmaId);
+  }
 }
 
 class FakeStorageService extends StorageService {
@@ -188,12 +198,14 @@ void main() {
   late FakeView view;
   late FakeAlarmService alarm;
   late FakeStorageService storage;
+  late FakeRecordatorioService recordatorio;
   late List<String> eventosLog;
 
   setUp(() {
     view = FakeView();
     alarm = FakeAlarmService();
     storage = FakeStorageService();
+    recordatorio = FakeRecordatorioService();
     eventosLog = [];
     // El presenter consulta WidgetsBinding.instance.lifecycleState para decidir
     // entre banner (app visible) y pantalla completa (app en segundo plano).
@@ -216,6 +228,7 @@ void main() {
       alarmService: alarm,
       storageService: storage,
       permissionService: FakePermissionService(),
+      recordatorioService: recordatorio,
       registro: eventosLog.add,
     );
     await presenter.iniciar();
@@ -334,6 +347,7 @@ void main() {
         alarmService: alarm,
         storageService: storage,
         permissionService: FakePermissionService(),
+        recordatorioService: recordatorio,
       );
       await presenter.iniciar();
 
@@ -544,6 +558,16 @@ void main() {
       expect(alarm.detenidas, isNot(contains(1)),
           reason: 'Una alarma nativa con ID activo en lista no debe detenerse');
     });
+
+    test('al arrancar se cancelan los recordatorios antiguos del package', () async {
+      alarm.alarmasNativas = [_settingsDummy(10001)];
+
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+
+      expect(alarm.detenidas, contains(10001));
+      expect(eventosLog.any((l) => l.contains('Recordatorio antiguo #10001')),
+          isTrue);
+    });
   });
 
   // ── cerrarConConfirmacion ──────────────────────────────────────────────────
@@ -724,6 +748,7 @@ void main() {
         alarmService: alarm,
         storageService: storage,
         permissionService: FakePermissionService(),
+        recordatorioService: recordatorio,
         registro: eventosLog.add,
       );
 
@@ -814,6 +839,7 @@ void main() {
         alarmService: alarm,
         storageService: storage,
         permissionService: permisos,
+        recordatorioService: recordatorio,
         registro: eventosLog.add,
       );
       await presenter.iniciar();

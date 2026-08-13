@@ -19,17 +19,8 @@ class AlarmService {
             ((evento) => unawaited(LogService.instancia.registrar(evento)));
 
   /// Sumidero del log de diagnóstico. Inyectable para poder verificar en las
-  /// pruebas que los recordatorios omitidos/fallidos quedan registrados.
+  /// pruebas que los errores de programación quedan registrados.
   final void Function(String evento) _registro;
-
-  /// Desplazamiento aplicado al ID de alarma para generar IDs de recordatorio.
-  ///
-  /// IDs reales: 1–9999. IDs de recordatorio: 10001–19999.
-  /// Usar [esIdRecordatorio] para comprobar si un ID pertenece a un recordatorio.
-  static const int offsetRecordatorio = 10000;
-
-  /// Devuelve true si el [id] pertenece a un recordatorio (no a una alarma real).
-  static bool esIdRecordatorio(int id) => id > offsetRecordatorio;
 
   /// Inicializa el package alarm. Debe llamarse antes de cualquier otra operación.
   Future<void> init() async {
@@ -88,70 +79,6 @@ class AlarmService {
           '"${alarma.etiqueta}": $e');
       rethrow;
     }
-  }
-
-  /// Programa un recordatorio silencioso 30 minutos antes del disparo de [alarma].
-  ///
-  /// Solo se programa si quedan más de 30 minutos para la alarma y la alarma
-  /// no está en modo snooze ([Alarma.pospuesta]). Si el recordatorio ya pasó o
-  /// la condición no se cumple, la llamada no hace nada.
-  Future<void> programarRecordatorio(Alarma alarma) async {
-    // No programar recordatorios para alarmas en snooze: tienen hora temporal.
-    if (alarma.pospuesta) {
-      _registro('Recordatorio 30 min OMITIDO para alarma #${alarma.id}: '
-          'pospuesta (snooze)');
-      return;
-    }
-
-    final idRecordatorio = alarma.id + offsetRecordatorio;
-    final momentoRecordatorio = alarma.hora.subtract(const Duration(minutes: 30));
-
-    // No programar si el momento ya pasó o es ahora mismo.
-    if (!momentoRecordatorio.isAfter(DateTime.now())) {
-      _registro('Recordatorio 30 min OMITIDO para alarma #${alarma.id}: '
-          'faltan menos de 30 min para el disparo');
-      return;
-    }
-
-    final horaTexto = formatearHoraAMPM(
-      DateTime(2000, 1, 1, alarma.horaDelDia, alarma.minutoDelDia),
-    );
-
-    try {
-      await Alarm.set(
-        alarmSettings: AlarmSettings(
-          id: idRecordatorio,
-          dateTime: momentoRecordatorio,
-          // El package requiere un audio path; se usa el mismo WAV pero con
-          // volumen 0 para que sea completamente silencioso.
-          assetAudioPath: archivoSonido,
-          volumeSettings: const VolumeSettings.fixed(
-            volume: 0,
-            volumeEnforced: false,
-          ),
-          notificationSettings: NotificationSettings(
-            title: 'Mi Despertador',
-            body: '${alarma.etiqueta} suena en 30 minutos ($horaTexto)',
-            stopButton: 'Cancelar',
-          ),
-          loopAudio: false,
-          vibrate: false,
-          androidFullScreenIntent: false,
-          warningNotificationOnKill: false,
-        ),
-      );
-      _registro('Recordatorio 30 min programado para alarma #${alarma.id} '
-          '(${formatearHoraAMPM(momentoRecordatorio)})');
-    } catch (e) {
-      _registro('⚠ ERROR al programar recordatorio de alarma #${alarma.id}: $e');
-    }
-  }
-
-  /// Cancela el recordatorio asociado a [alarmaId].
-  ///
-  /// Es seguro llamar aunque no exista un recordatorio programado.
-  Future<void> cancelarRecordatorio(int alarmaId) async {
-    await Alarm.stop(alarmaId + offsetRecordatorio);
   }
 
   /// Detiene una alarma nativa por su ID.
