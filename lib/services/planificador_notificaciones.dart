@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
@@ -33,7 +34,20 @@ class PlanificadorLocalNotifications implements PlanificadorNotificaciones {
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
 
   final FlutterLocalNotificationsPlugin _plugin;
-  bool _inicializado = false;
+
+  /// Future en vuelo de la inicialización, compartido entre llamadas
+  /// solapadas.
+  ///
+  /// Se guarda el Future en sí (no un booleano) porque `inicializar()` tiene
+  /// dos `await` de por medio: con un booleano marcado solo al final, dos
+  /// llamadas a `programar`/`cancelar` que lleguen mientras el primer
+  /// `await` está pendiente pasarían el guard a la vez y ejecutarían
+  /// `tzdata.initializeTimeZones()`/`_plugin.initialize()` por duplicado,
+  /// algo que el plugin nativo no documenta como seguro. Guardando el
+  /// Future, la segunda llamada espera el mismo trabajo en vez de
+  /// repetirlo. `null` mientras no hay inicialización en curso ni completada
+  /// con éxito.
+  Future<void>? _inicializacion;
 
   static const NotificationDetails _detalles = NotificationDetails(
     android: AndroidNotificationDetails(
@@ -49,8 +63,33 @@ class PlanificadorLocalNotifications implements PlanificadorNotificaciones {
   );
 
   @override
-  Future<void> inicializar() async {
-    if (_inicializado) return;
+  Future<void> inicializar() {
+    // `??=` es sincrónico: no hay ningún `await` entre leer y escribir
+    // `_inicializacion`, así que dos llamadas solapadas siempre ven la
+    // misma asignación y comparten el mismo Future.
+    return _inicializacion ??= _inicializarUnaVez();
+  }
+
+  Future<void> _inicializarUnaVez() async {
+    try {
+      await ejecutarInicializacion();
+    } catch (e) {
+      // Se limpia el Future en vuelo para que la siguiente llamada pueda
+      // reintentar; si no, un fallo puntual (p. ej. sin timezone disponible)
+      // quedaría cacheado para siempre y ninguna notificación futura se
+      // llegaría a inicializar.
+      _inicializacion = null;
+      rethrow;
+    }
+  }
+
+  /// Trabajo real de inicialización (timezone + plugin nativo).
+  ///
+  /// Separado de [inicializar] y marcado `@visibleForTesting` para que un
+  /// test pueda sustituirlo en una subclase y contar cuántas veces se
+  /// ejecuta, sin tocar el canal de plataforma del plugin nativo.
+  @visibleForTesting
+  Future<void> ejecutarInicializacion() async {
     tzdata.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation(await _nombreZonaHoraria()));
     await _plugin.initialize(
@@ -58,7 +97,6 @@ class PlanificadorLocalNotifications implements PlanificadorNotificaciones {
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
     );
-    _inicializado = true;
   }
 
   /// Nombre IANA de la zona horaria del dispositivo.
