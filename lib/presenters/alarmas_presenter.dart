@@ -351,7 +351,15 @@ class AlarmasPresenter {
 
     if (_alarmaSonando == null) {
       // Nada sonando: momento seguro para reparar lo que el sistema haya perdido.
+      // Normalizar primero: una alarma activa vencida (el OEM canceló su
+      // AlarmManager antes de disparar) debe tener su hora recalculada ANTES
+      // de auditar, o la auditoría no la vería como "futura" y la ignoraría.
+      final huboCambios = _normalizarAlarmasVencidas();
       await _auditarAlarmasProgramadas();
+      if (huboCambios) {
+        await _guardarAlarmas();
+        _view.onAlarmaActualizada();
+      }
       return;
     }
 
@@ -447,18 +455,20 @@ class AlarmasPresenter {
     return faltantes;
   }
 
-  /// Carga las alarmas desde almacenamiento persistente.
+  /// Recalcula alarmas activas cuya `hora` ya venció (incluyendo snoozes
+  /// expirados), usando `horaDelDia`/`minutoDelDia` como referencia canónica:
+  /// - Una sola vez → se desactiva.
+  /// - Recurrente → se recalcula la próxima fecha de disparo.
+  /// En ambos casos se limpia `pospuesta` y `confirmacionPendiente`.
   ///
-  /// Si encuentra alarmas vencidas (incluyendo snoozes expirados), recalcula
-  /// su próxima fecha de disparo usando horaDelDia/minutoDelDia.
-  /// Limpia alarmas nativas huérfanas que no están en SharedPreferences.
-  Future<void> _cargarAlarmas() async {
-    final resultado = await _storageService.cargarAlarmas();
-    _alarmas = resultado.alarmas;
-    _nextId = resultado.nextId;
-
-    await _auditarAlarmasProgramadas();
-
+  /// Debe correr ANTES de [_auditarAlarmasProgramadas]: esta última solo
+  /// considera "faltante" (y por tanto reprograma) una alarma activa con hora
+  /// futura. Si no se normaliza antes, una alarma activa vencida que el
+  /// sistema perdió (OEM canceló su AlarmManager) nunca se detectaría como
+  /// perdida.
+  ///
+  /// Devuelve true si se modificó alguna alarma.
+  bool _normalizarAlarmasVencidas() {
     final ahora = DateTime.now();
     var huboCambios = false;
 
@@ -474,7 +484,27 @@ class AlarmasPresenter {
         alarma.pospuesta = false;
         huboCambios = true;
       }
+    }
 
+    return huboCambios;
+  }
+
+  /// Carga las alarmas desde almacenamiento persistente.
+  ///
+  /// Si encuentra alarmas vencidas (incluyendo snoozes expirados), recalcula
+  /// su próxima fecha de disparo usando horaDelDia/minutoDelDia.
+  /// Limpia alarmas nativas huérfanas que no están en SharedPreferences.
+  Future<void> _cargarAlarmas() async {
+    final resultado = await _storageService.cargarAlarmas();
+    _alarmas = resultado.alarmas;
+    _nextId = resultado.nextId;
+
+    final huboCambios = _normalizarAlarmasVencidas();
+    await _auditarAlarmasProgramadas();
+
+    final ahora = DateTime.now();
+
+    for (final alarma in _alarmas) {
       if (alarma.activa && alarma.hora.isAfter(ahora)) {
         await _alarmService.programar(alarma);
         // Reprogramar recordatorio si quedan más de 30 minutos.

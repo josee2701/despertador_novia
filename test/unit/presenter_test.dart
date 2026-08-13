@@ -935,11 +935,50 @@ void main() {
       alarm.sonandoIds.add(6);
       alarm.alarmasNativas = [];
       alarm.detenidas.clear();
+      final horaAntes = presenter.alarmas.first.hora;
 
       await presenter.onAppResumed();
 
       expect(alarm.detenidas, isEmpty,
           reason: 'Auditar con una alarma sonando podría silenciarla');
+      expect(presenter.alarmas.first.hora, horaAntes,
+          reason: 'Tampoco debe normalizarse su hora mientras suena');
+    });
+
+    test('repara una alarma recurrente activa y vencida que el sistema perdió',
+        () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 7, diasSemana: [1, 2, 3, 4, 5])]);
+
+      // Simular que pasó el tiempo: la hora programada ya venció y, mientras
+      // tanto, el sistema perdió la alarma (OEM canceló su AlarmManager).
+      presenter.alarmas.first.hora = DateTime(2020, 1, 1, 7, 0);
+      alarm.alarmasNativas = [];
+      alarm.programadas.clear();
+      recordatorio.programados.clear();
+
+      await presenter.onAppResumed();
+
+      expect(presenter.alarmas.first.hora.isAfter(DateTime.now()), isTrue,
+          reason: 'Debe recalcular una hora futura, no quedar con la vencida');
+      expect(alarm.programadas.map((a) => a.id), contains(7));
+      expect(recordatorio.programados, contains(7));
+    });
+
+    test('desactiva una alarma de una sola vez vencida que el sistema perdió',
+        () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 8, diasSemana: [])]);
+
+      presenter.alarmas.first.hora = DateTime(2020, 1, 1, 7, 0);
+      alarm.alarmasNativas = [];
+      alarm.programadas.clear();
+      recordatorio.programados.clear();
+
+      await presenter.onAppResumed();
+
+      expect(presenter.alarmas.first.activa, isFalse,
+          reason:
+              'Una alarma de una sola vez vencida debe desactivarse, no reprogramarse');
+      expect(alarm.programadas.where((a) => a.id == 8), isEmpty);
     });
   });
 }
