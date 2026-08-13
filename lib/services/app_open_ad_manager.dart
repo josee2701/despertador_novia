@@ -111,9 +111,15 @@ class AppOpenAdManager {
     if (!(Platform.isAndroid || Platform.isIOS)) return;
     final id = _adUnitId;
     if (id == null) {
+      // Dos motivos distintos: en Android release el ID de producción está
+      // vacío; fuera de Android (iOS release) no hay bloque configurado en
+      // absoluto, así que culpar a la constante de Android despistaría.
       unawaited(LogService.instancia.registrar(
-        'AppOpenAd desactivado: falta el ID de producción en '
-        'constantes.idAppOpenAdAndroid',
+        Platform.isAndroid
+            ? 'AppOpenAd desactivado: falta el ID de producción en '
+                'constantes.idAppOpenAdAndroid'
+            : 'AppOpenAd desactivado en ${Platform.operatingSystem}: solo hay '
+                'bloque de producción configurado para Android',
       ));
       return;
     }
