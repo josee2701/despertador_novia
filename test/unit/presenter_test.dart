@@ -568,6 +568,26 @@ void main() {
       expect(eventosLog.any((l) => l.contains('Recordatorio antiguo #10001')),
           isTrue);
     });
+
+    test('una alarma sonando al arrancar no se cancela como huérfana', () async {
+      // Reproduce el escenario que motiva esta rama: una alarma de una sola
+      // vez sigue sonando porque el OEM mató el proceso mientras sonaba y la
+      // app se reabre. Su hora ya venció pero activa sigue en true, y el
+      // paquete nativo (alarm.alarmasNativas) todavía la reporta porque
+      // sigue sonando de verdad.
+      final a = _alarmaSimple(id: 50, activa: true, diasSemana: []);
+      a.hora = DateTime(2020, 1, 1, 7, 0); // vencida: ya disparó
+      alarm.alarmasNativas = [_settingsDummy(50)];
+
+      await arrancar(alarmas: [a]);
+
+      expect(alarm.detenidas, isNot(contains(50)),
+          reason: 'Si _cargarAlarmas normalizara (desactivara) esta alarma '
+              'ANTES de auditar, la auditoría dejaría de verla como activa y '
+              'la trataría como huérfana, llamando a Alarm.stop y '
+              'silenciando una alarma que el usuario todavía no ha detenido. '
+              'Auditar debe correr antes de normalizar en _cargarAlarmas.');
+    });
   });
 
   // ── cerrarConConfirmacion ──────────────────────────────────────────────────

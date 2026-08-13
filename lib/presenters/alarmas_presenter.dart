@@ -461,11 +461,26 @@ class AlarmasPresenter {
   /// - Recurrente → se recalcula la próxima fecha de disparo.
   /// En ambos casos se limpia `pospuesta` y `confirmacionPendiente`.
   ///
-  /// Debe correr ANTES de [_auditarAlarmasProgramadas]: esta última solo
-  /// considera "faltante" (y por tanto reprograma) una alarma activa con hora
-  /// futura. Si no se normaliza antes, una alarma activa vencida que el
-  /// sistema perdió (OEM canceló su AlarmManager) nunca se detectaría como
-  /// perdida.
+  /// ⚠ El orden respecto a [_auditarAlarmasProgramadas] IMPORTA y es distinto
+  /// según quién llama, a propósito — no lo unifiques sin releer esto:
+  ///
+  /// - En [onAppResumed] se llama ANTES de auditar. Ahí no puede haber una
+  ///   alarma sonando de una sola vez con hora vencida (ese caso sale por el
+  ///   guard de `_alarmaSonando` antes de llegar aquí), así que es seguro
+  ///   desactivarla primero; y hace falta, porque si no se normaliza antes,
+  ///   una alarma activa vencida que el sistema perdió nunca se vería como
+  ///   "faltante" (la auditoría solo repone activas con hora futura).
+  /// - En [_cargarAlarmas] se llama DESPUÉS de auditar. Justo al arrancar SÍ
+  ///   puede existir una alarma de una sola vez que sigue sonando (el OEM
+  ///   mató el proceso mientras sonaba y se reabre la app): su `hora` ya está
+  ///   en el pasado y `activa` sigue en `true`. Si se normalizara antes de
+  ///   auditar, quedaría `activa = false` y la auditoría, al no verla ya en
+  ///   `idsActivas`, la trataría como huérfana y la cancelaría — silenciando
+  ///   una alarma que sigue sonando. Auditando primero, todavía cuenta como
+  ///   activa y queda protegida; la normalización llega después y la
+  ///   desactiva sin tocar el audio. El bucle final de `_cargarAlarmas`
+  ///   (reprogramar activas con hora futura) cubre el reprogramado de las
+  ///   vencidas recurrentes que la normalización acaba de recalcular.
   ///
   /// Devuelve true si se modificó alguna alarma.
   bool _normalizarAlarmasVencidas() {
@@ -499,8 +514,13 @@ class AlarmasPresenter {
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
 
-    final huboCambios = _normalizarAlarmasVencidas();
+    // Auditar ANTES de normalizar: si una alarma de una sola vez sigue
+    // sonando (hora ya vencida, activa == true) porque el OEM mató el
+    // proceso mientras sonaba, auditar primero la mantiene contando como
+    // "activa" y evita que la huérfana la cancele y silencie el audio. Ver
+    // el comentario de _normalizarAlarmasVencidas para el detalle completo.
     await _auditarAlarmasProgramadas();
+    final huboCambios = _normalizarAlarmasVencidas();
 
     final ahora = DateTime.now();
 
