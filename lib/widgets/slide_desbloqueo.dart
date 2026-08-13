@@ -71,6 +71,14 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
   void _onPanUpdate(DragUpdateDetails details) {
     if (_completado) return;
 
+    // Si el usuario vuelve a arrastrar mientras el reset anima, se detiene la
+    // animación: en caso contrario su listener pisaría _arrastre en cada frame
+    // y el deslizamiento se sentiría congelado.
+    if (_animacionReset.isAnimating) {
+      _animacionReset.stop();
+      _arrastreInicial = Offset.zero;
+    }
+
     setState(() {
       _arrastre += details.delta;
     });
