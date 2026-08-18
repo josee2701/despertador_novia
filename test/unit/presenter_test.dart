@@ -78,22 +78,34 @@ class FakeAlarmService extends AlarmService {
   Stream<AlarmSet> get ringingStream => ringingController.stream;
 }
 
+/// Doble del servicio de recordatorios que NO sobrescribe su lógica: corre la
+/// real sobre un planificador en memoria y expone lo que quedó programado.
+///
+/// Sobrescribir `programar`/`cancelar` hacía que el doble mintiera sobre la
+/// garantía del servicio —dejar el recordatorio al día o ninguno, nunca uno
+/// viejo con la hora anterior—, que es justo lo que los tests del presenter
+/// necesitan poder comprobar. Mismo motivo por el que FakeAlarmService.detener
+/// borra de `alarmasNativas`.
 class FakeRecordatorioService extends RecordatorioService {
-  FakeRecordatorioService() : super(planificador: PlanificadorFalso());
+  FakeRecordatorioService._(this.planificador)
+      : super(planificador: planificador, registro: _ignorar);
 
-  final Set<int> programados = {};
-  final List<int> cancelados = [];
+  factory FakeRecordatorioService() =>
+      FakeRecordatorioService._(PlanificadorFalso());
 
-  @override
-  Future<void> programar(Alarma alarma) async {
-    programados.add(alarma.id);
-  }
+  static void _ignorar(String evento) {}
 
-  @override
-  Future<void> cancelar(int alarmaId) async {
-    programados.remove(alarmaId);
-    cancelados.add(alarmaId);
-  }
+  final PlanificadorFalso planificador;
+
+  /// IDs de ALARMA (no de notificación) con recordatorio vivo.
+  Set<int> get programados => planificador.programados.keys
+      .map((id) => id - RecordatorioService.offsetNotificacion)
+      .toSet();
+
+  /// IDs de ALARMA cuyo recordatorio se retiró, en orden.
+  List<int> get cancelados => planificador.cancelados
+      .map((id) => id - RecordatorioService.offsetNotificacion)
+      .toList();
 }
 
 class FakeStorageService extends StorageService {
@@ -725,6 +737,30 @@ void main() {
               'arranque) con las alarmas ya cargadas en memoria');
       expect(presenter.alarmas.length, 2,
           reason: 'Los datos sí se leyeron: el fallo fue posterior');
+    });
+  });
+
+  // ── recordatorios al editar ───────────────────────────────────────────────
+
+  group('el recordatorio nunca sobrevive con la hora vieja', () {
+    test('mover la alarma a menos de 30 min retira su recordatorio', () async {
+      // Antes había que llamar a cancelar() antes de programar() en cada
+      // método actualizar*. Esa garantía vive ahora dentro del servicio, así
+      // que este test la comprueba desde el presenter, que es quien la usa.
+      await arrancar(alarmas: [_alarmaSimple(id: 40, diasSemana: [])]);
+      expect(recordatorio.programados, contains(40),
+          reason: 'La alarma de las 07:00 de 2030 sí tiene recordatorio');
+
+      final dentroDe10Min = DateTime.now().add(const Duration(minutes: 10));
+      await presenter.actualizarHora(
+        presenter.alarmas.first,
+        dentroDe10Min.hour,
+        dentroDe10Min.minute,
+      );
+
+      expect(recordatorio.programados, isNot(contains(40)),
+          reason: 'Ya no procede avisar "suena en 30 minutos": el aviso de la '
+              'hora anterior tiene que desaparecer, no quedarse');
     });
   });
 

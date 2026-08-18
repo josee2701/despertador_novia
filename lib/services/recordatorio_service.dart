@@ -28,15 +28,23 @@ class RecordatorioService {
   /// Cuánto antes del disparo se avisa.
   static const Duration antelacion = Duration(minutes: 30);
 
-  /// Programa el recordatorio de [alarma], si procede.
+  /// Deja programado el recordatorio de [alarma], o ninguno.
   ///
   /// Se omite en dos casos, ambos registrados en el log de diagnóstico:
   /// la alarma está pospuesta (su hora es temporal) o falta menos de la
   /// [antelacion] para que suene.
+  ///
+  /// En los dos casos de omisión se RETIRA el recordatorio anterior. Es la
+  /// diferencia entre "no programar" y "dejar el de antes": al reprogramar sí
+  /// basta con volver a llamar (`zonedSchedule` reemplaza por ID), pero al
+  /// omitir nadie sustituye al viejo y saltaría con la hora equivocada —
+  /// "suena en 30 minutos" sobre una alarma que ya sonó, o que se movió. Al
+  /// vivir aquí, ningún llamante necesita acordarse de cancelar antes.
   Future<void> programar(Alarma alarma) async {
     if (alarma.pospuesta) {
       _registro('Recordatorio 30 min OMITIDO para alarma #${alarma.id}: '
           'pospuesta (snooze)');
+      await cancelar(alarma.id);
       return;
     }
 
@@ -44,6 +52,7 @@ class RecordatorioService {
     if (!momento.isAfter(DateTime.now())) {
       _registro('Recordatorio 30 min OMITIDO para alarma #${alarma.id}: '
           'faltan menos de 30 min para el disparo');
+      await cancelar(alarma.id);
       return;
     }
 

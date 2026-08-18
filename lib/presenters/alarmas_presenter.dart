@@ -944,8 +944,8 @@ class AlarmasPresenter {
     alarma.hora = proximaFecha(nuevaHora, nuevoMinuto, alarma.diasSemana);
     if (alarma.activa) {
       await _alarmService.programar(alarma);
-      // Cancelar el recordatorio anterior y programar uno con la nueva hora.
-      await _recordatorioService.cancelar(alarma.id);
+      // Deja el recordatorio con la hora nueva, o ninguno si ya no procede:
+      // programar() se encarga de retirar el anterior en ese caso.
       await _recordatorioService.programar(alarma);
     }
     await _guardarAlarmas();
@@ -957,8 +957,7 @@ class AlarmasPresenter {
     alarma.etiqueta = nuevaEtiqueta.trim().isEmpty ? 'Alarma' : nuevaEtiqueta.trim();
     if (alarma.activa) {
       await _alarmService.programar(alarma);
-      // Reprogramar el recordatorio para que muestre la etiqueta actualizada.
-      await _recordatorioService.cancelar(alarma.id);
+      // Reprograma el recordatorio para que muestre la etiqueta actualizada.
       await _recordatorioService.programar(alarma);
     }
     await _guardarAlarmas();
@@ -972,8 +971,7 @@ class AlarmasPresenter {
     if (alarma.activa) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, nuevosDias);
       await _alarmService.programar(alarma);
-      // Actualizar el recordatorio con la nueva próxima fecha de disparo.
-      await _recordatorioService.cancelar(alarma.id);
+      // Actualiza el recordatorio con la nueva próxima fecha de disparo.
       await _recordatorioService.programar(alarma);
     }
 
@@ -1011,7 +1009,6 @@ class AlarmasPresenter {
       await _alarmService.programar(alarma);
       // Actualizar el recordatorio si cambió cualquier dato que aparece en la notificación.
       if ((nuevaHora != null && nuevoMinuto != null) || nuevosDias != null || nuevaEtiqueta != null) {
-        await _recordatorioService.cancelar(alarma.id);
         await _recordatorioService.programar(alarma);
       }
     }

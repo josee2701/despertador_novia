@@ -77,6 +77,40 @@ void main() {
     expect(logs.any((l) => l.contains('OMITIDO')), isTrue);
   });
 
+  test('al omitir por snooze retira el recordatorio con la hora vieja', () async {
+    // El recordatorio de las 06:30 ya está puesto. La persona pospone: la
+    // alarma pasa a sonar en 5 minutos y programar() OMITE. Sin retirar el
+    // anterior, a las 06:30 salta un aviso que miente ("suena en 30 minutos")
+    // sobre una alarma que ya sonó.
+    final alarma = _alarma(id: 4, falta: const Duration(hours: 2));
+    await servicio.programar(alarma);
+    expect(planificador.programados,
+        contains(4 + RecordatorioService.offsetNotificacion));
+
+    alarma.pospuesta = true;
+    await servicio.programar(alarma);
+
+    expect(planificador.programados,
+        isNot(contains(4 + RecordatorioService.offsetNotificacion)),
+        reason: 'Si no se programa uno nuevo, el viejo no puede sobrevivir');
+  });
+
+  test('al omitir por falta de tiempo retira el recordatorio con la hora vieja',
+      () async {
+    // Mismo caso por la otra vía: la alarma se edita a una hora que está a
+    // menos de 30 minutos. zonedSchedule reemplaza por ID, pero aquí no llega
+    // a llamarse, así que la retirada tiene que ser explícita.
+    final alarma = _alarma(id: 5, falta: const Duration(hours: 2));
+    await servicio.programar(alarma);
+
+    alarma.hora = DateTime.now().add(const Duration(minutes: 10));
+    await servicio.programar(alarma);
+
+    expect(planificador.programados,
+        isNot(contains(5 + RecordatorioService.offsetNotificacion)),
+        reason: 'El aviso de la hora anterior debe desaparecer');
+  });
+
   test('cancelar borra la notificación del ID desplazado', () async {
     final alarma = _alarma(id: 7);
     await servicio.programar(alarma);
