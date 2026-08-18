@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -14,11 +16,19 @@ class SlideDesbloqueo extends StatefulWidget {
   final double umbral;
   final ValueChanged<String>? onDireccionCambiada;
 
+  /// Alto de la zona de arrastre.
+  ///
+  /// NO decide cuánto hay que deslizar —eso es [_recorridoVertical], una
+  /// constante—, solo hasta dónde acompaña el control al dedo antes de
+  /// quedarse en el borde. La pantalla la reduce si tiene poco espacio.
+  final double altura;
+
   const SlideDesbloqueo({
     super.key,
     required this.onDesbloqueado,
     this.umbral = 0.75,
     this.onDireccionCambiada,
+    this.altura = 220,
   });
 
   @override
@@ -27,6 +37,24 @@ class SlideDesbloqueo extends StatefulWidget {
 
 class _SlideDesbloqueoState extends State<SlideDesbloqueo>
     with TickerProviderStateMixin {
+  /// Fracción del ancho disponible que hay que recorrer para llegar al 100 %.
+  static const double _fraccionAncho = 0.4;
+
+  /// Recorrido vertical equivalente, en píxeles.
+  ///
+  /// Antes se calculaba sobre una constante de 80 px, así que con el umbral
+  /// habitual (0.75) la alarma se apagaba con 24 px de arrastre, frente a los
+  /// 82-109 px del horizontal: un roce de alguien medio dormido bastaba en la
+  /// única pantalla que no debe poder descartarse por accidente. Este valor
+  /// deja los dos ejes en el mismo orden de magnitud (~98 px con umbral 0.75).
+  ///
+  /// Es una constante y no una fracción del alto disponible a propósito: el
+  /// gesto sigue al dedo aunque salga de la caja, así que el tamaño del widget
+  /// no representa el recorrido posible.
+  static const double _recorridoVertical = 130.0;
+
+  /// Radio del control redondo, para no dejarlo salir de la zona visible.
+  static const double _radioControl = 32.0;
   late Offset _direccionObjetivo;
   Offset _arrastre = Offset.zero;
   Offset _arrastreInicial = Offset.zero;
@@ -124,10 +152,26 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
     if (_anchoDisponible == 0) return 0.0;
 
     final maxDistancia = _direccionObjetivo.dx != 0
-        ? _anchoDisponible * 0.4
-        : 80.0 * 0.4;
+        ? _anchoDisponible * _fraccionAncho
+        : _recorridoVertical;
 
     return (dot / maxDistancia).clamp(0.0, 1.0);
+  }
+
+  /// Desplazamiento del control en pantalla: sigue al dedo, pero acotado a la
+  /// zona visible. El progreso se calcula con el arrastre REAL, no con esto.
+  ///
+  /// Sin el tope, el `Stack` recorta el control a media pista (recorta también
+  /// en horizontal, donde el arrastre siempre pudo pasarse del borde) y la
+  /// persona ve desaparecer aquello que está moviendo. El avance de verdad lo
+  /// cuenta la barra de progreso.
+  Offset get _desplazamientoVisual {
+    final margenX = math.max(0.0, _anchoDisponible / 2 - _radioControl);
+    final margenY = math.max(0.0, widget.altura / 2 - _radioControl);
+    return Offset(
+      _arrastre.dx.clamp(-margenX, margenX),
+      _arrastre.dy.clamp(-margenY, margenY),
+    );
   }
 
   Color _colorProgreso(double progreso) {
@@ -148,7 +192,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
           onPanEnd: _onPanEnd,
           behavior: HitTestBehavior.translucent,
           child: SizedBox(
-            height: 120,
+            height: widget.altura,
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -168,7 +212,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
                   opacity: _completado ? 0.0 : 1.0,
                   duration: const Duration(milliseconds: 300),
                   child: Transform.translate(
-                    offset: _arrastre,
+                    offset: _desplazamientoVisual,
                     child: Container(
                       width: 64,
                       height: 64,

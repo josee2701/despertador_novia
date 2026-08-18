@@ -128,6 +128,19 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     });
   }
 
+  /// Alto de la zona de arrastre, ajustado al espacio de la pantalla.
+  ///
+  /// Esta Column no tiene scroll: si el deslizador ocupa más de lo que sobra,
+  /// los `Spacer` se quedan sin sitio y desborda. Reducirlo NO hace el gesto
+  /// más fácil —lo que hay que deslizar es una constante del widget—, solo
+  /// acorta el trecho en el que el control acompaña al dedo.
+  double _alturaDeslizador(BuildContext context) {
+    final alto = MediaQuery.sizeOf(context).height;
+    if (alto >= 760) return 220;
+    if (alto >= 660) return 170;
+    return 120;
+  }
+
   @override
   Widget build(BuildContext context) {
     final partes = partesHora12h(_ahora);
@@ -277,6 +290,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                     onDesbloqueado: _iniciarCountdown,
                     umbral: 0.75,
                     onDireccionCambiada: _onDireccionCambiada,
+                    altura: _alturaDeslizador(context),
                   ),
 
                 const SizedBox(height: 24),
