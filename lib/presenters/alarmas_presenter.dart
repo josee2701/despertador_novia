@@ -674,8 +674,8 @@ class AlarmasPresenter {
   /// Cada operación va en su propio try/catch: una alarma que lance no debe
   /// impedir que las demás se auditen o se repongan.
   ///
-  /// Devuelve los IDs que faltaban.
-  Future<Set<int>> _auditarAlarmasProgramadas({
+  /// El resultado se registra en el log; ningún llamante necesita el detalle.
+  Future<void> _auditarAlarmasProgramadas({
     Set<int> idsSonando = const {},
   }) async {
     final idsActivas = _alarmas.where((a) => a.activa).map((a) => a.id).toSet();
@@ -726,8 +726,6 @@ class AlarmasPresenter {
         }
       }
     }
-
-    return faltantes;
   }
 
   /// Recalcula alarmas activas cuya `hora` ya venció (incluyendo snoozes
