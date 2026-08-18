@@ -78,6 +78,13 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       // mostrado — el candado impide que el anuncio aparezca sobre ella.
       _presenter.onAppResumed().then((_) {
         if (!mounted) return;
+        // Si el presenter difirió el resume (iniciar() seguía en vuelo, p. ej.
+        // por el diálogo de exención de batería), aún no ha consultado
+        // alarmIsRinging: hayAlarmaSonando sería false por desconocimiento, no
+        // por certeza, y el anuncio podría acabar encima de una alarma
+        // sonando. Con información incompleta no se muestra nada; el resume se
+        // procesará solo al terminar iniciar().
+        if (_presenter.resumePendiente) return;
         _appOpenAd.mostrarSiProcede(
           hayAlarmaSonando: _presenter.hayAlarmaSonando,
         );

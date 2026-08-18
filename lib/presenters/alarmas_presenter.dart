@@ -71,6 +71,27 @@ class AlarmasPresenter {
    // Previene que onAppResumed apile múltiples rutas mientras la alarma sigue sonando.
   bool _alertaEnPantalla = false;
 
+  /// IDs que el sistema reportaba SONANDO en el momento de cargar las alarmas,
+  /// es decir, antes de que la app tuviera estado alguno.
+  ///
+  /// Distingue los dos orígenes posibles de un evento de `Alarm.ringing`:
+  /// - La app se abrió POR la alarma (full-screen intent con el proceso
+  ///   muerto). `Alarm.init()` → `checkAlarm()` siembra el BehaviorSubject de
+  ///   `ringing` con esa alarma ANTES de que [_iniciarEscuchaRinging] se
+  ///   suscriba, así que el primer evento que recibimos ya la trae y el ciclo
+  ///   de vida está en `resumed` (la Activity acaba de abrirse). Sin esta
+  ///   distinción se tomaba la rama del banner: la persona se despertaba con
+  ///   un aviso pequeño en la pantalla principal en vez de
+  ///   `PantallaAlarmaActiva` y su deslizamiento anti-remoloneo.
+  /// - La alarma empezó a sonar con la app ya en uso → banner, que es lo
+  ///   correcto ahí: la persona está mirando la pantalla.
+  ///
+  /// Se rellena en [_cargarAlarmas] con la consulta real al sistema
+  /// (`alarmIsRinging`), la misma fuente que usa `checkAlarm()`, y cada ID se
+  /// consume al atenderlo: un disparo posterior de esa misma alarma (p. ej. la
+  /// confirmación de despertar) ya ocurre con la app en uso.
+  final Set<int> _idsSonandoAlArrancar = {};
+
   /// IDs de alarmas que estamos deteniendo por acción del usuario.
   /// Evita que el cleanup del _onAlarmaSonando interfiera con
   /// cerrarConConfirmacion / detenerAlarma / posponerAlarma.
@@ -88,6 +109,18 @@ class AlarmasPresenter {
   /// Guardia de reentrada de [onAppResumed]: dos `resumed` encadenados no
   /// deben auditar a la vez sobre la misma lista.
   bool _procesandoResume = false;
+
+  /// True cuando llegó un `resumed` que aún no se ha podido procesar porque
+  /// [iniciar] seguía en vuelo. Ver [resumePendiente].
+  bool _resumePendiente = false;
+
+  /// True mientras haya un `resumed` recibido pero todavía sin procesar.
+  ///
+  /// La vista lo consulta en el `.then()` que encadena a [onAppResumed]: hasta
+  /// que el resume se procese, [hayAlarmaSonando] no significa nada (nadie ha
+  /// consultado aún `alarmIsRinging`), así que decidir con ese valor podría
+  /// mostrar el anuncio de apertura ENCIMA de una alarma sonando.
+  bool get resumePendiente => _resumePendiente;
 
   /// Desplazamiento con el que las versiones ANTIGUAS de la app programaban el
   /// aviso de "suena en 30 minutos" como ALARMA nativa (`Alarm.set`).
@@ -192,6 +225,14 @@ class AlarmasPresenter {
     _iniciarTimer();
     _iniciarEscuchaRinging();
     _iniciado = true;
+    // Un `resumed` que llegó mientras esto seguía en vuelo NO se descarta: se
+    // difiere hasta aquí, con la lista cargada y la escucha de `Alarm.ringing`
+    // ya montada, que es justo lo que le faltaba.
+    if (_resumePendiente) {
+      _resumePendiente = false;
+      _log('Resume diferido: se procesa ahora que iniciar() ha terminado');
+      await onAppResumed();
+    }
   }
 
   /// Cancela las alarmas nativas que las versiones antiguas de la app crearon
@@ -359,11 +400,23 @@ class AlarmasPresenter {
       final tipoDisparo = alarma.confirmacionPendiente
           ? 'RE-SONÓ (confirmación de despertar a los 30s)'
           : 'DISPARÓ';
+      // Se consume la marca: un disparo posterior de esta misma alarma ya
+      // ocurre con la app en uso, no en un arranque provocado por ella.
+      final yaSonabaAlArrancar = _idsSonandoAlArrancar.remove(alarma.id);
       _log('Alarma #${alarma.id} "${alarma.etiqueta}" $tipoDisparo '
-          '(app: ${lifecycle == AppLifecycleState.resumed ? "visible" : "segundo plano/bloqueada"})');
-      if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
-        // App visible: mostrar banner no intrusivo; el fullscreen es para cuando
-        // el teléfono estaba bloqueado (lo maneja onAppResumed).
+          '(app: ${lifecycle == AppLifecycleState.resumed ? "visible" : "segundo plano/bloqueada"}'
+          '${yaSonabaAlArrancar ? ", abierta POR la alarma" : ""})');
+      if (yaSonabaAlArrancar && !_alertaEnPantalla) {
+        // La alarma ya sonaba antes de que la app existiera: el full-screen
+        // intent abrió la Activity POR ella. Aunque el ciclo de vida diga
+        // "resumed", la persona está dormida y no ha tocado nada, así que le
+        // toca la pantalla completa con el deslizamiento anti-remoloneo, no un
+        // banner que se ignora medio dormida.
+        _alertaEnPantalla = true;
+        _view.onMostrarPantallaAlarma(alarma);
+      } else if (lifecycle == AppLifecycleState.resumed && !_alertaEnPantalla) {
+        // App visible y en uso: mostrar banner no intrusivo; el fullscreen es
+        // para cuando el teléfono estaba bloqueado (lo maneja onAppResumed).
         _alertaEnPantalla = true;
         _view.onAlarmaSonandoEnForeground(alarma);
       }
@@ -458,12 +511,21 @@ class AlarmasPresenter {
   /// - [_iniciado]: los diálogos de permisos que abre [iniciar] provocan un
   ///   `resumed` mientras `iniciar()` sigue en vuelo. Auditar y normalizar
   ///   entonces trabaja sobre una lista a medio cargar y sin la escucha de
-  ///   `Alarm.ringing` montada.
+  ///   `Alarm.ringing` montada. Ese resume se DIFIERE, nunca se descarta (ver
+  ///   [resumePendiente]).
   /// - [_procesandoResume]: dos `resumed` encadenados no deben auditar a la
   ///   vez sobre la misma lista.
   Future<void> onAppResumed() async {
     if (!_iniciado) {
-      _log('Resume ignorado: iniciar() todavía no ha terminado');
+      // Descartarlo sin más era una regresión crítica: la vista encadena un
+      // `.then()` a este Future para decidir el anuncio de apertura, y ese
+      // callback corría igual con `hayAlarmaSonando == false` —nadie había
+      // consultado `alarmIsRinging`— pudiendo mostrar el anuncio ENCIMA de una
+      // alarma sonando. Se marca como pendiente y lo procesa [iniciar] al
+      // terminar; mientras tanto, [resumePendiente] le dice a la vista que
+      // todavía no puede decidir nada.
+      _resumePendiente = true;
+      _log('Resume diferido: iniciar() todavía no ha terminado');
       return;
     }
     if (_procesandoResume) return;
@@ -717,6 +779,12 @@ class AlarmasPresenter {
     // _iniciarEscuchaRinging() se suscriba, así que _onAlarmaSonando ni se
     // entera). Las gestionan _onAlarmaSonando / detenerAlarma a su tiempo.
     final idsSonando = await _idsSonandoAhora();
+    // Se recuerda quién sonaba YA al arrancar: cuando el evento sembrado de
+    // `Alarm.ringing` llegue, _onAlarmaSonando sabrá que la app se abrió POR
+    // esa alarma y mostrará la pantalla completa en vez del banner.
+    _idsSonandoAlArrancar
+      ..clear()
+      ..addAll(idsSonando);
     if (idsSonando.isNotEmpty) {
       _log('Arranque con alarma(s) $idsSonando SONANDO: se dejan intactas '
           '(no se auditan, normalizan ni reprograman)');

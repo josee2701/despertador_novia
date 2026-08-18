@@ -44,13 +44,27 @@ class FakeAlarmService extends AlarmService {
   Future<void> detener(int id) async {
     detenidas.add(id);
     sonandoIds.remove(id);
+    // Fidelidad con el package real: `Alarm.stop` borra la alarma del
+    // AlarmStorage, así que deja de aparecer en `Alarm.getAlarms()`. Sin esto
+    // el doble mentía: una alarma cancelada seguía figurando como nativa, y la
+    // auditoría podía "cubrir" bugs de capas anteriores (la purga de
+    // recordatorios heredados quedaba indistinguible de la auditoría).
+    //
+    // Se reemplaza la lista en vez de mutarla: la auditoría itera sobre la
+    // lista que devolvió getAlarmasNativas() y mutarla in situ la rompería con
+    // un ConcurrentModificationError.
+    alarmasNativas =
+        alarmasNativas.where((nativa) => nativa.id != id).toList();
   }
 
   @override
   Future<bool> alarmIsRinging(int id) async => sonandoIds.contains(id);
 
+  /// Copia defensiva, como el servicio real: `Alarm.getAlarms()` construye una
+  /// lista nueva en cada llamada.
   @override
-  Future<List<AlarmSettings>> getAlarmasNativas() async => alarmasNativas;
+  Future<List<AlarmSettings>> getAlarmasNativas() async =>
+      List<AlarmSettings>.of(alarmasNativas);
 
   @override
   Stream<AlarmSet> get ringingStream => ringingController.stream;
@@ -615,10 +629,17 @@ void main() {
           reason: 'Una alarma nativa con ID activo en lista no debe detenerse');
     });
 
-    test('al arrancar se cancelan los recordatorios antiguos del package', () async {
-      alarm.alarmasNativas = [_settingsDummy(10001)];
-
+    test('un recordatorio heredado que reaparece después se cancela en la auditoría',
+        () async {
+      // Al arrancar no había ninguno (la purga no tiene nada que hacer). El
+      // recordatorio heredado aparece más tarde: lo rearmó ArranqueReceiver
+      // con el AlarmStorage que dejó la versión vieja. Esta es la red de
+      // seguridad de la auditoría, distinta de la purga de `iniciar()`.
       await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+      alarm.alarmasNativas = [_settingsDummy(10001)];
+      alarm.detenidas.clear();
+
+      await presenter.onAppResumed();
 
       expect(alarm.detenidas, contains(10001));
       expect(eventosLog.any((l) => l.contains('Recordatorio antiguo #10001')),
@@ -643,6 +664,68 @@ void main() {
               'la trataría como huérfana, llamando a Alarm.stop y '
               'silenciando una alarma que el usuario todavía no ha detenido. '
               'Auditar debe correr antes de normalizar en _cargarAlarmas.');
+    });
+
+    test('una alarma INACTIVA en almacenamiento pero SONANDO no se cancela',
+        () async {
+      // Aísla la guardia `if (idsSonando.contains(nativa.id)) continue;` de
+      // _auditarAlarmasProgramadas, sin apoyarse en ninguna otra protección:
+      // la alarma está persistida como inactiva (un arranque anterior la
+      // desactivó), así que NO entra en `idsActivas` y la auditoría la ve como
+      // huérfana. Solo la consulta al sistema ("¿suena ahora?") la salva.
+      // Sin ese `continue`, Alarm.stop mata el audio de una alarma que la
+      // persona todavía no ha atendido.
+      final a = _alarmaSimple(id: 90, activa: false, diasSemana: []);
+      a.hora = DateTime(2020, 1, 1, 6, 0);
+      alarm.alarmasNativas = [_settingsDummy(90)];
+      alarm.sonandoIds.add(90);
+
+      await arrancar(alarmas: [a]);
+
+      expect(alarm.detenidas, isNot(contains(90)),
+          reason: 'La alarma suena AHORA: la auditoría debe respetarla aunque '
+              'ya no figure como activa en el almacenamiento');
+      expect(eventosLog.any((l) => l.contains('#90 suena ahora mismo')), isTrue,
+          reason: 'La excepción debe quedar registrada en el diagnóstico');
+    });
+  });
+
+  // ── purga de recordatorios heredados ───────────────────────────────────────
+
+  group('purga de recordatorios heredados', () {
+    test('la purga cancela el recordatorio heredado ANTES de auditar', () async {
+      // Cubre _purgarRecordatoriosHeredados de forma aislada: es la capa que
+      // protege la ventana entre MY_PACKAGE_REPLACED (ArranqueReceiver rearma
+      // un recordatorio de la versión vieja) y la primera apertura de la app.
+      // La auditoría también cancelaría este ID, así que la prueba se ancla al
+      // mensaje propio de la purga y a su posición en el log.
+      alarm.alarmasNativas = [_settingsDummy(10001)];
+
+      await arrancar(alarmas: [_alarmaSimple(id: 1)]);
+
+      expect(alarm.detenidas, contains(10001));
+      final indicePurga = eventosLog
+          .indexWhere((l) => l.contains('Recordatorio heredado #10001 purgado'));
+      expect(indicePurga, isNonNegative,
+          reason: 'Sin la llamada a _purgarRecordatoriosHeredados en iniciar() '
+              'este evento no existe: el recordatorio solo moriría más tarde, '
+              'en la auditoría de _cargarAlarmas');
+      final indiceAuditoria =
+          eventosLog.indexWhere((l) => l.contains('Auditoría'));
+      expect(indiceAuditoria, isNonNegative);
+      expect(indicePurga, lessThan(indiceAuditoria),
+          reason: 'La purga debe correr justo tras Alarm.init(), antes de que '
+              'nada más toque el estado nativo');
+    });
+
+    test('la purga no toca las alarmas normales', () async {
+      alarm.alarmasNativas = [_settingsDummy(1)];
+
+      await arrancar(alarmas: [_alarmaSimple(id: 1, activa: true)]);
+
+      expect(alarm.detenidas, isEmpty,
+          reason: 'Solo los IDs por encima del offset heredado son '
+              'recordatorios: una alarma normal jamás debe purgarse');
     });
   });
 
@@ -1248,6 +1331,58 @@ void main() {
       expect(alarm.programadas.where((p) => p.id == 62), isEmpty);
     });
 
+    test('la alarma que ya sonaba al arrancar abre la PANTALLA COMPLETA, no el banner',
+        () async {
+      // Camino principal del escenario que motiva toda la rama: el
+      // full-screen intent abre la Activity POR la alarma. `Alarm.init()` →
+      // `checkAlarm()` siembra el BehaviorSubject de `ringing` con la alarma
+      // que ya suena, así que _iniciarEscuchaRinging() recibe ese valor nada
+      // más suscribirse — con el ciclo de vida ya en `resumed`, porque la
+      // Activity acaba de abrirse.
+      final a = _alarmaSimple(id: 65, activa: true, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
+      a.hora = DateTime(2020, 1, 1, 6, 0);
+      alarm.alarmasNativas = [_settingsDummy(65)];
+      alarm.sonandoIds.add(65);
+
+      await arrancar(alarmas: [a]);
+
+      alarm.ringingController.add(AlarmSet([_settingsDummy(65)]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(view.ultimaAlarmaRinging, isNotNull,
+          reason: 'La app se abrió POR la alarma: debe verse '
+              'PantallaAlarmaActiva con su deslizamiento, no un aviso pequeño');
+      expect(view.ultimaAlarmaForeground, isNull,
+          reason: 'El banner es solo para cuando la alarma suena con la app ya '
+              'en uso');
+    });
+
+    test('tras atenderla, un nuevo disparo con la app en uso vuelve al banner',
+        () async {
+      // La marca "ya sonaba al arrancar" se consume: el re-sonido de la
+      // confirmación de despertar ocurre con la persona mirando la app.
+      final a = _alarmaSimple(id: 66, activa: true, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
+      a.hora = DateTime(2020, 1, 1, 6, 0);
+      alarm.alarmasNativas = [_settingsDummy(66)];
+      alarm.sonandoIds.add(66);
+
+      await arrancar(alarmas: [a]);
+      alarm.ringingController.add(AlarmSet([_settingsDummy(66)]));
+      await Future<void>.delayed(Duration.zero);
+      expect(view.ultimaAlarmaRinging, isNotNull);
+
+      // El usuario la atiende y la alarma vuelve a sonar más tarde.
+      await presenter.detenerAlarma(presenter.alarmas.first);
+      alarm.ringingController.add(AlarmSet.empty());
+      await Future<void>.delayed(Duration.zero);
+      alarm.sonandoIds.add(66);
+      alarm.ringingController.add(AlarmSet([_settingsDummy(66)]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(view.ultimaAlarmaForeground, isNotNull,
+          reason: 'Con la app en uso el aviso correcto es el banner');
+    });
+
     test('una alarma que NO suena sí se reprograma en el mismo arranque', () async {
       final sonando = _alarmaSimple(id: 63, activa: true, diasSemana: [1, 2, 3, 4, 5, 6, 7]);
       sonando.hora = DateTime(2020, 1, 1, 6, 0);
@@ -1321,17 +1456,64 @@ void main() {
         recordatorioService: recordatorio,
         registro: eventosLog.add,
       );
+      int? auditoriasDuranteIniciar;
       // El diálogo del sistema de exención de batería se cierra y llega
       // `resumed` mientras iniciar() sigue en vuelo.
-      permisos.alSolicitarExencionBateria = () => presenter.onAppResumed();
+      permisos.alSolicitarExencionBateria = () async {
+        await presenter.onAppResumed();
+        auditoriasDuranteIniciar = auditorias();
+      };
 
       await presenter.iniciar();
 
-      expect(auditorias(), 1,
-          reason: 'Solo debe auditar _cargarAlarmas; un onAppResumed '
-              'reentrante auditaría por segunda vez sobre un estado a medio '
-              'construir, con el mismo riesgo de cancelar como huérfana una '
-              'alarma que está sonando');
+      expect(auditoriasDuranteIniciar, 1,
+          reason: 'Mientras iniciar() sigue en vuelo solo debe haber auditado '
+              '_cargarAlarmas; un onAppResumed reentrante auditaría por '
+              'segunda vez sobre un estado a medio construir, con el mismo '
+              'riesgo de cancelar como huérfana una alarma que está sonando');
+      expect(auditorias(), 2,
+          reason: 'El resume no se descarta: se difiere y se procesa (y por '
+              'tanto audita) cuando iniciar() ya ha terminado');
+    });
+
+    test('un resume durante iniciar() queda PENDIENTE y se procesa al terminar',
+        () async {
+      // Regresión crítica: con el resume descartado, el `.then()` que la vista
+      // encadena a onAppResumed corría igual con hayAlarmaSonando == false y
+      // el App Open Ad podía aparecer ENCIMA de la alarma sonando. Ventana
+      // real: la persona denegó la exención de batería, así que iniciar() abre
+      // ese diálogo del sistema (otra Activity → paused → resumed).
+      final permisos = FakePermissionService()..exentoBateria = false;
+      storage.precargar([_alarmaSimple(id: 82, diasSemana: [1, 2, 3, 4, 5])]);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+      bool? pendienteJustoDespues;
+      permisos.alSolicitarExencionBateria = () async {
+        // Al cerrar el diálogo la alarma ya está sonando.
+        alarm.sonandoIds.add(82);
+        await presenter.onAppResumed();
+        pendienteJustoDespues = presenter.resumePendiente;
+      };
+
+      await presenter.iniciar();
+
+      expect(pendienteJustoDespues, isTrue,
+          reason: 'Es la señal que consulta la vista: mientras el resume esté '
+              'sin procesar no puede decidir el anuncio, porque '
+              'hayAlarmaSonando todavía no significa nada');
+      expect(presenter.resumePendiente, isFalse,
+          reason: 'Al terminar iniciar() el resume diferido ya se procesó');
+      expect(presenter.hayAlarmaSonando, isTrue,
+          reason: 'El resume diferido debe detectar la alarma con '
+              'alarmIsRinging, igual que si hubiera llegado más tarde');
+      expect(view.ultimaAlarmaRinging, isNotNull,
+          reason: 'Y mostrar su pantalla completa');
     });
 
     test('dos onAppResumed simultáneos auditan una sola vez', () async {
