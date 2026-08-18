@@ -60,11 +60,19 @@ class FakeAlarmService extends AlarmService {
   @override
   Future<bool> alarmIsRinging(int id) async => sonandoIds.contains(id);
 
+  /// Si es true, getAlarmasNativas lanza: simula el canal nativo caído a
+  /// mitad de la carga de alarmas.
+  bool lanzarEnGetAlarmasNativas = false;
+
   /// Copia defensiva, como el servicio real: `Alarm.getAlarms()` construye una
   /// lista nueva en cada llamada.
   @override
-  Future<List<AlarmSettings>> getAlarmasNativas() async =>
-      List<AlarmSettings>.of(alarmasNativas);
+  Future<List<AlarmSettings>> getAlarmasNativas() async {
+    if (lanzarEnGetAlarmasNativas) {
+      throw StateError('fallo simulado al consultar las alarmas nativas');
+    }
+    return List<AlarmSettings>.of(alarmasNativas);
+  }
 
   @override
   Stream<AlarmSet> get ringingStream => ringingController.stream;
@@ -687,6 +695,67 @@ void main() {
               'ya no figure como activa en el almacenamiento');
       expect(eventosLog.any((l) => l.contains('#90 suena ahora mismo')), isTrue,
           reason: 'La excepción debe quedar registrada en el diagnóstico');
+    });
+  });
+
+  // ── la vista nunca se queda sin noticias ──────────────────────────────────
+
+  group('robustez de _cargarAlarmas', () {
+    test('si la carga lanza a mitad, la vista se entera igualmente', () async {
+      // Sin esto la lista se queda congelada: _alarmas ya tiene los datos
+      // buenos, pero onAlarmasCargadas() nunca se llama porque la excepción
+      // salta antes de la última línea. El catch de iniciar() se la traga y la
+      // persona abre la app y no ve NINGUNA alarma, aunque estén todas ahí.
+      storage.precargar([_alarmaSimple(id: 1), _alarmaSimple(id: 2)]);
+      alarm.lanzarEnGetAlarmasNativas = true;
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: FakePermissionService(),
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+
+      await presenter.iniciar();
+
+      expect(view.cargadasCount, greaterThan(0),
+          reason: 'La vista tiene que recibir onAlarmasCargadas pase lo que '
+              'pase, o se queda mostrando la lista anterior (vacía en el '
+              'arranque) con las alarmas ya cargadas en memoria');
+      expect(presenter.alarmas.length, 2,
+          reason: 'Los datos sí se leyeron: el fallo fue posterior');
+    });
+  });
+
+  // ── alarmas solapadas ─────────────────────────────────────────────────────
+
+  group('dos alarmas sonando a la vez', () {
+    test('manda la primera y el solapamiento queda registrado', () async {
+      // El package descarta la segunda alarma con unsaveAlarm cuando
+      // allowAlarmOverlap es false (su valor por defecto), así que el patrón
+      // "alarma de respaldo 5 minutos después" NO suena y la auditoría no la
+      // repone. Aquí no se puede arreglar sin forkear el package, pero tiene
+      // que quedar rastro en el diagnóstico: es la única forma de reconocer
+      // el patrón si la usuaria vuelve a reportar que no sonó.
+      await arrancar(alarmas: [
+        _alarmaSimple(id: 70, diasSemana: [1, 2, 3, 4, 5, 6, 7]),
+        _alarmaSimple(id: 71, diasSemana: [1, 2, 3, 4, 5, 6, 7]),
+      ]);
+
+      alarm.ringingController
+          .add(AlarmSet([_settingsDummy(70), _settingsDummy(71)]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(view.ultimaAlarmaForeground?.id, 70,
+          reason: 'Se muestra la primera que empezó a sonar');
+      expect(presenter.alarmaSonando?.id, 70,
+          reason: 'El estado interno debe apuntar a la alarma que la persona '
+              'está viendo: detenerla desde esa pantalla tiene que dejar '
+              'hayAlarmaSonando en false');
+      expect(eventosLog.any((l) => l.contains('#71') && l.contains('SOLAPADA')),
+          isTrue,
+          reason: 'Sin esta línea el patrón es invisible en el diagnóstico');
     });
   });
 

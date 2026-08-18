@@ -168,6 +168,10 @@ class AlarmasPresenter {
   /// True si hay una alarma sonando activamente.
   bool get hayAlarmaSonando => _alarmaSonando != null;
 
+  /// La alarma que suena ahora mismo, o null. Es siempre la misma que la vista
+  /// tiene en pantalla (banner o `PantallaAlarmaActiva`).
+  Alarma? get alarmaSonando => _alarmaSonando;
+
   /// Atajo para registrar un evento en el log de diagnóstico.
   void _log(String evento) => _registro(evento);
 
@@ -385,16 +389,38 @@ class AlarmasPresenter {
     }
 
     // Procesar alarmas que empezaron a sonar desde el último evento.
+    //
+    // Solo la PRIMERA gobierna el estado y la pantalla. Antes ganaba la última
+    // del bucle, así que con dos alarmas a la vez la persona veía el aviso de
+    // una mientras _alarmaSonando apuntaba a la otra: detener la de la
+    // pantalla dejaba hayAlarmaSonando en true y _procesarResume consultaba a
+    // la equivocada.
+    Alarma? primeraNueva;
     for (final configuracion in conjunto.alarms) {
       if (_prevAlarmSet.containsId(configuracion.id)) continue;
 
       final alarma = _alarmas.where((a) => a.id == configuracion.id).firstOrNull
           ?? _alarmaDesdeConfig(configuracion);
+      alarma.pospuesta = false;
+
+      if (primeraNueva != null) {
+        // No hay arreglo posible desde Dart: el package descarta la segunda
+        // alarma en `onStartCommand` (`allowAlarmOverlap` es false por
+        // defecto) y la auditoría tampoco la repone, porque su hora ya pasó y
+        // solo repone las futuras. Se registra para que el patrón "alarma de
+        // respaldo cinco minutos después" sea reconocible en el diagnóstico si
+        // la usuaria vuelve a reportar que no sonó.
+        _log('⚠ Alarma #${alarma.id} "${alarma.etiqueta}" SOLAPADA con la '
+            '#${primeraNueva.id}: solo se atiende la primera. El package '
+            'descarta las que se solapan, así que una alarma de respaldo a la '
+            'misma hora NO suena');
+        _idsSonandoAlArrancar.remove(alarma.id);
+        continue;
+      }
+      primeraNueva = alarma;
 
       _alarmaSonando = alarma;
       _inicioSonando = DateTime.now();
-      alarma.pospuesta = false;
-      _guardarAlarmas();
 
       final lifecycle = WidgetsBinding.instance.lifecycleState;
       final tipoDisparo = alarma.confirmacionPendiente
@@ -424,6 +450,8 @@ class AlarmasPresenter {
       // onAppResumed verificará con alarmIsRinging si sigue sonando antes de mostrarla,
       // evitando que una ruta quede apilada si el usuario ya detuvo desde la notificación.
     }
+    // Un solo guardado por evento, con `pospuesta` ya limpio en todas.
+    if (primeraNueva != null) _guardarAlarmas();
     _prevAlarmSet = conjunto;
   }
 
@@ -765,6 +793,21 @@ class AlarmasPresenter {
   /// su próxima fecha de disparo usando horaDelDia/minutoDelDia.
   /// Limpia alarmas nativas huérfanas que no están en SharedPreferences.
   Future<void> _cargarAlarmas() async {
+    // Todo el cuerpo va en un try/finally porque el aviso a la vista NO es
+    // opcional: si algo de aquí dentro lanza (canal nativo caído, DataStore
+    // ilegible), _alarmas puede tener ya los datos buenos y la vista se
+    // quedaría congelada en la lista anterior —vacía en el arranque—. La
+    // persona abriría la app y no vería NINGUNA alarma aunque estén todas
+    // guardadas. La excepción sigue subiendo a iniciar(), que la registra.
+    try {
+      await _cuerpoCargarAlarmas();
+    } finally {
+      _view.onAlarmasCargadas();
+    }
+  }
+
+  /// Cuerpo real de [_cargarAlarmas]. Ver allí por qué está separado.
+  Future<void> _cuerpoCargarAlarmas() async {
     final resultado = await _storageService.cargarAlarmas();
     _alarmas = resultado.alarmas;
     _nextId = resultado.nextId;
@@ -819,7 +862,6 @@ class AlarmasPresenter {
     }
 
     if (huboCambios) await _guardarAlarmas();
-    _view.onAlarmasCargadas();
   }
 
   /// Persiste la lista actual de alarmas en almacenamiento local.
