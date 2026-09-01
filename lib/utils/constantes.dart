@@ -27,4 +27,4 @@ const claveAutostartAtendido = 'autostartAtendido';
 ///
 /// Vacío = el anuncio de apertura queda desactivado (comportamiento seguro).
 /// Rellenar con el ID real creado en la consola de AdMob.
-const idAppOpenAdAndroid = '';
+const idAppOpenAdAndroid = 'ca-app-pub-6637517205793062/1438450532';
