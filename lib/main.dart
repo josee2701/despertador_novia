@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'screens/pantalla_alarmas.dart';
@@ -18,6 +19,12 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   _configurarCapturaDeErrores();
+
+  // Dibujar de borde a borde (detrás de las barras de estado y navegación)
+  // también en Android 14 o anterior, igual que Android 15+ hace por defecto.
+  // Así todos los usuarios ven la misma UI; los insets los cubren Scaffold
+  // y SafeArea.
+  unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
 
   // Inicializar SDK de anuncios (no bloqueante)
   unawaited(MobileAds.instance.initialize());
