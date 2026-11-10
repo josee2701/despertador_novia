@@ -59,7 +59,7 @@ void main() {
       final hayAlarmas = find.byType(Dismissible);
       if (hayAlarmas.evaluate().isEmpty) {
         expect(find.text('No tienes alarmas'), findsOneWidget);
-        expect(find.text('Toca + para crear tu primera alarma'), findsOneWidget);
+        expect(find.text('Toca el botón azul para crear tu primera alarma'), findsOneWidget);
         debugPrint('RESULTADO: Pantalla vacía - sin alarmas');
       } else {
         debugPrint('RESULTADO: Pantalla con alarmas existentes');
@@ -83,7 +83,7 @@ void main() {
       await tomarScreenshot(binding, tester, '02_dialogo_nueva_alarma_simple');
 
       expect(find.text('Listo'), findsOneWidget);
-      expect(find.text('Configurar repetición y nombre'), findsOneWidget);
+      expect(find.text('Repetición y nombre'), findsOneWidget);
 
       await tester.tap(find.text('Listo'));
       await tester.pump(const Duration(seconds: 1));
@@ -104,7 +104,7 @@ void main() {
       await tester.tap(find.text('Nueva alarma'));
       await tester.pump(const Duration(seconds: 1));
 
-      await tester.tap(find.text('Configurar repetición y nombre'));
+      await tester.tap(find.text('Repetición y nombre'));
       await tester.pump(const Duration(milliseconds: 500));
 
       await tomarScreenshot(binding, tester, '04_dialogo_alarma_configurar');
@@ -253,7 +253,7 @@ void main() {
       if (lista.evaluate().isEmpty) {
         await tomarScreenshot(binding, tester, '15_estado_vacio');
         expect(find.text('No tienes alarmas'), findsOneWidget);
-        expect(find.text('Toca + para crear tu primera alarma'), findsOneWidget);
+        expect(find.text('Toca el botón azul para crear tu primera alarma'), findsOneWidget);
         debugPrint('RESULTADO: Estado vacío correcto');
       } else {
         debugPrint('OMITIDO: Hay alarmas actualmente, estado vacío no aplica');
@@ -302,7 +302,7 @@ void main() {
       await tester.tap(find.text('Nueva alarma'));
       await tester.pump(const Duration(seconds: 1));
 
-      await tester.tap(find.text('Configurar repetición y nombre'));
+      await tester.tap(find.text('Repetición y nombre'));
       await tester.pump(const Duration(milliseconds: 500));
 
       final chipLunVie = find.text('Lun–Vie');

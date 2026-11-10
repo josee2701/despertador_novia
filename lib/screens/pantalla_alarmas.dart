@@ -7,6 +7,7 @@ import '../models/alarma.dart';
 import '../presenters/alarmas_presenter.dart';
 import '../screens/pantalla_alarma_activa.dart';
 import '../screens/pantalla_diagnostico.dart';
+import '../services/app_open_ad_manager.dart';
 import '../widgets/banner_ad_widget.dart';
 import '../widgets/dialogo_alarma.dart';
 import '../widgets/tarjeta_alarma.dart';
@@ -30,9 +31,16 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     with WidgetsBindingObserver
     implements AlarmasView {
   late final AlarmasPresenter _presenter;
+  late final AppOpenAdManager _appOpenAd;
   bool _modoNoMolestar = false;
+  bool _fullScreenDenegado = false;
+  bool _autostartRecomendado = false;
   bool _animarFAB = false;
   Alarma? _alarmaRinging;
+
+  /// Ruta de `PantallaAlarmaActiva` que empujó [onMostrarPantallaAlarma], para
+  /// poder cerrar SOLO esa si la alarma se detiene desde fuera.
+  Route<void>? _rutaAlarma;
 
   @override
   void initState() {
@@ -42,6 +50,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     _presenter.iniciar().catchError((Object e, StackTrace s) {
       debugPrint('Error al iniciar presenter: $e');
     });
+
+    // Anuncio de apertura: precarga uno (solo tiene efecto en móvil).
+    _appOpenAd = AppOpenAdManager();
+    _appOpenAd.cargar();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final alarmas = _presenter.alarmas;
@@ -55,13 +67,39 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _presenter.dispose();
+    _appOpenAd.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _presenter.onAppResumed();
+      // Reanudar el reloj al volver a primer plano (refresca de inmediato).
+      _presenter.reanudarTimer();
+      // onAppResumed es async: se ESPERA a que termine antes de decidir el
+      // anuncio. Así hayAlarmaSonando ya refleja la comprobación de
+      // alarmIsRinging y, si había alarma, la pantalla de alarma ya se habrá
+      // mostrado — el candado impide que el anuncio aparezca sobre ella.
+      _presenter.onAppResumed().then((_) {
+        if (!mounted) return;
+        // Si el presenter difirió el resume (iniciar() seguía en vuelo, p. ej.
+        // por el diálogo de exención de batería), aún no ha consultado
+        // alarmIsRinging: hayAlarmaSonando sería false por desconocimiento, no
+        // por certeza, y el anuncio podría acabar encima de una alarma
+        // sonando. Con información incompleta no se muestra nada; el resume se
+        // procesará solo al terminar iniciar().
+        if (_presenter.resumePendiente) return;
+        _appOpenAd.mostrarSiProcede(
+          hayAlarmaSonando: _presenter.hayAlarmaSonando,
+        );
+      });
+    } else if (state == AppLifecycleState.paused) {
+      // Pausar el reloj en segundo plano para no gastar CPU en algo invisible.
+      // No se pausa en inactive/hidden para evitar parpadeos en transiciones.
+      _presenter.pausarTimer();
+      // Marca que la app estuvo en segundo plano: habilita el resume caliente
+      // del anuncio (evita mostrarlo en arranque en frío / apertura por alarma).
+      _appOpenAd.marcarEnPausa();
     }
   }
 
@@ -79,14 +117,23 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   void onAlarmaActualizada() {
-    if (mounted) {
-      setState(() {
-        // Si la alarma ya no está sonando (detenida externamente), cerrar el banner.
-        if (!_presenter.hayAlarmaSonando) {
-          _alarmaRinging = null;
-        }
-      });
+    if (!mounted) return;
+    // Detenida externamente con la pantalla de alarma abierta: sin esto queda
+    // encima, muda y con atrás bloqueado, y deslizarla programaría una
+    // re-sonada de una alarma ya apagada. En el flujo normal la propia
+    // pantalla ya hizo pop antes de llegar aquí, así que `isActive` es false
+    // y no se cierra dos veces. removeRoute quita solo esa ruta.
+    final ruta = _rutaAlarma;
+    if (!_presenter.hayAlarmaSonando && ruta != null) {
+      _rutaAlarma = null;
+      if (ruta.isActive) Navigator.of(context).removeRoute(ruta);
     }
+    setState(() {
+      // Si la alarma ya no está sonando (detenida externamente), cerrar el banner.
+      if (!_presenter.hayAlarmaSonando) {
+        _alarmaRinging = null;
+      }
+    });
   }
 
   @override
@@ -109,24 +156,30 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   }
 
   @override
+  void onFullScreenIntentDenegado(bool denegado) {
+    if (mounted) setState(() => _fullScreenDenegado = denegado);
+  }
+
+  @override
+  void onAutostartRecomendado(bool recomendado) {
+    if (mounted) setState(() => _autostartRecomendado = recomendado);
+  }
+
+  @override
   void onMostrarPantallaAlarma(Alarma alarma) {
     if (!mounted) return;
 
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        fullscreenDialog: true,
-        barrierColor: Colors.transparent,
-        pageBuilder: (ctx, animation, secondaryAnimation) =>
-            PantallaAlarmaActiva(
-              alarma: alarma,
-              onDetener: () => _presenter.detenerAlarma(alarma),
-              onPosponer: () => _presenter.posponerAlarma(alarma),
-              onCerrarConConfirmacion: () =>
-                  _presenter.cerrarConConfirmacion(alarma), // ← NUEVO
-            ),
+    final ruta = _rutaAlarma = PageRouteBuilder<void>(
+      fullscreenDialog: true,
+      barrierColor: Colors.transparent,
+      pageBuilder: (ctx, animation, secondaryAnimation) => PantallaAlarmaActiva(
+        alarma: alarma,
+        onDetener: () => _presenter.detenerAlarma(alarma),
+        onPosponer: () => _presenter.posponerAlarma(alarma),
+        onCerrarConConfirmacion: () => _presenter.cerrarConConfirmacion(alarma),
       ),
     );
+    Navigator.push(context, ruta);
   }
 
   @override
@@ -134,9 +187,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     if (!mounted) return;
     setState(() => _alarmaRinging = alarma);
   }
-
-  @override
-  BuildContext getContext() => context;
 
   // ─── Acciones del usuario ───────────────────────────────────────
 
@@ -149,6 +199,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       builder: (ctx) => DialogoAlarma(
         onGuardar: (hora, minuto, etiqueta, dias) async {
           Navigator.pop(ctx);
+          if (_avisarSiColisiona(hora, minuto, dias)) return;
           await _presenter.agregarAlarma(
             hora: hora,
             minuto: minuto,
@@ -170,6 +221,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         alarma: alarma,
         onGuardar: (hora, minuto, etiqueta, dias) async {
           Navigator.pop(ctx);
+          if (alarma.activa &&
+              _avisarSiColisiona(hora, minuto, dias, excluirId: alarma.id)) {
+            return;
+          }
           await _presenter.actualizarAlarmaCompleta(
             alarma: alarma,
             nuevaHora: hora,
@@ -180,6 +235,31 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         },
       ),
     );
+  }
+
+  /// Si guardar dejaría dos alarmas activas en el mismo minuto, avisa y
+  /// devuelve true: el package cancelaría una de las dos en silencio.
+  bool _avisarSiColisiona(int hora, int minuto, List<int> dias,
+      {int? excluirId}) {
+    final otra = _presenter.alarmaQueColisiona(
+      hora: hora,
+      minuto: minuto,
+      diasSemana: dias,
+      excluirId: excluirId,
+    );
+    if (otra == null || !mounted) return otra != null;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Ya tienes "${otra.etiqueta}" a esa hora y solo '
+              'sonaría una. Elige otro minuto.'),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    return true;
   }
 
   /// Elimina una alarma con opción de deshacer (SnackBar).
@@ -247,6 +327,47 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     );
   }
 
+  /// Banner de advertencia (fondo error suave) con un botón de acción.
+  /// Reutilizado por los avisos de No Molestar y de pantalla completa.
+  Widget _bannerAdvertencia({
+    required String texto,
+    required String textoBoton,
+    required VoidCallback onPressed,
+  }) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: Theme.of(context).colorScheme.onErrorContainer,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              texto,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onErrorContainer,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(onPressed: onPressed, child: Text(textoBoton)),
+        ],
+      ),
+    );
+  }
+
   // ─── Build ──────────────────────────────────────────────────────
 
   @override
@@ -258,8 +379,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         final horaB = b.horaDelDia * 60 + b.minutoDelDia;
         return horaA.compareTo(horaB);
       });
-    final proximaTexto = _presenter.obtenerTextoProximaAlarma();
-    final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -294,12 +413,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
               onVer: () {
                 final alarma = _alarmaRinging!;
                 setState(() => _alarmaRinging = null);
-                onMostrarPantallaAlarma(alarma);
-              },
-              onDetener: () {
-                final alarma = _alarmaRinging!;
-                setState(() => _alarmaRinging = null);
-                _presenter.detenerAlarma(alarma);
+                _presenter.mostrarPantallaAlarmaDesdeBanner(alarma);
               },
               onPosponer: () {
                 final alarma = _alarmaRinging!;
@@ -333,93 +447,88 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                 ),
               ],
             ),
-            child: Column(
-              children: [
-                if (hayAlarmas)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.alarm, color: Colors.white, size: 20),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          'Próxima alarma: $proximaTexto',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
+            // Solo este texto ("Próxima alarma… en X") se reconstruye cada
+            // segundo, escuchando ahoraNotifier. El resto de la pantalla
+            // (gradiente, lista, banner) queda fuera y no se reconstruye.
+            child: ValueListenableBuilder<DateTime>(
+              valueListenable: _presenter.ahoraNotifier,
+              builder: (context, _, _) {
+                final proximaTexto = _presenter.obtenerTextoProximaAlarma();
+                final hayAlarmas = _presenter.obtenerProximaAlarma() != null;
+                return Column(
+                  children: [
+                    if (hayAlarmas)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.alarm,
+                              color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Próxima alarma: $proximaTexto',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        ],
+                      )
+                    else
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.nights_stay_outlined,
+                            color: Colors.white.withValues(alpha: 0.8),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            proximaTexto,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
-                    ],
-                  )
-                else
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.nights_stay_outlined,
-                        color: Colors.white.withValues(alpha: 0.8),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        proximaTexto,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 15,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
 
           // ── Advertencia No Molestar ──
           if (_modoNoMolestar)
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.errorContainer.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.errorContainer.withValues(alpha: 0.4),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Modo No Molestar activo — Tu alarma podría no sonar',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onErrorContainer,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => _presenter.abrirConfiguracion(),
-                    child: const Text('Abrir config.'),
-                  ),
-                ],
-              ),
+            _bannerAdvertencia(
+              texto: 'Modo No Molestar activo — Tu alarma podría no sonar',
+              textoBoton: 'Abrir config.',
+              onPressed: () => _presenter.abrirConfiguracion(),
+            ),
+
+          // ── Advertencia full-screen intent (Android 14+/MIUI) ──
+          if (_fullScreenDenegado)
+            _bannerAdvertencia(
+              texto: 'Sin permiso de pantalla completa — la alarma podría no '
+                  'aparecer con el teléfono bloqueado',
+              textoBoton: 'Conceder',
+              onPressed: () => _presenter.abrirAjustesFullScreenIntent(),
+            ),
+
+          // ── Advertencia Inicio automático (Xiaomi, Huawei, Oppo…) ──
+          if (_autostartRecomendado)
+            _bannerAdvertencia(
+              texto: 'Tu teléfono puede cerrar la app y cancelar las alarmas. '
+                  'Activa el Inicio automático',
+              textoBoton: 'Activar',
+              onPressed: () => _presenter.abrirAutostart(),
             ),
 
           // ── Lista de alarmas ──
@@ -484,6 +593,12 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                           child: TarjetaAlarma(
                             alarma: alarma,
                             onToggle: (v) {
+                              if (v &&
+                                  _avisarSiColisiona(alarma.horaDelDia,
+                                      alarma.minutoDelDia, alarma.diasSemana,
+                                      excluirId: alarma.id)) {
+                                return;
+                              }
                               _presenter.toggleAlarma(alarma, v);
                               HapticFeedback.selectionClick();
                             },
@@ -570,18 +685,18 @@ class _FABAnimadoState extends State<_FABAnimado>
 
 /// Banner que aparece cuando la alarma suena mientras la app está en primer plano.
 ///
-/// Muestra un aviso sutil en la parte superior con opciones para ver,
-/// detener o posponer la alarma. No bloquea la pantalla actual.
+/// Muestra un aviso sutil en la parte superior con opciones para ver o
+/// posponer la alarma. No bloquea la pantalla actual. A propósito NO hay
+/// "Detener": apagarla de un toque saltaría el deslizamiento y la
+/// confirmación de despertar; para eso está "Ver".
 class _BannerAlarmaSonando extends StatefulWidget {
   final Alarma alarma;
   final VoidCallback onVer;
-  final VoidCallback onDetener;
   final VoidCallback onPosponer;
 
   const _BannerAlarmaSonando({
     required this.alarma,
     required this.onVer,
-    required this.onDetener,
     required this.onPosponer,
   });
 
@@ -673,40 +788,24 @@ class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
               ],
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onPosponer,
-                    icon: const Icon(Icons.snooze, size: 16),
-                    label: const Text('5 min'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(
-                        context,
-                      ).colorScheme.onPrimaryContainer,
-                      side: BorderSide(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.primary.withValues(alpha: 0.3),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                    ),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: widget.onPosponer,
+                icon: const Icon(Icons.snooze, size: 16),
+                label: const Text('5 min'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onPrimaryContainer,
+                  side: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: 0.3),
                   ),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: widget.onDetener,
-                    icon: const Icon(Icons.stop, size: 16),
-                    label: const Text('Detener'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),

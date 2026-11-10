@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -82,6 +83,15 @@ class MainActivity : FlutterActivity() {
                             )
                         }
                         result.success(abierto)
+                    }
+                    // Milisegundos transcurridos desde el último arranque del
+                    // dispositivo. Se compara entre sesiones: si baja, hubo un
+                    // reinicio (posible pérdida de alarmas si el OEM no entregó
+                    // BOOT_COMPLETED). No cuenta el tiempo en sueño profundo de
+                    // forma idéntica entre versiones, pero un descenso siempre
+                    // implica reinicio.
+                    "tiempoEncendidoMs" -> {
+                        result.success(SystemClock.elapsedRealtime())
                     }
                     else -> result.notImplemented()
                 }

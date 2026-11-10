@@ -46,4 +46,28 @@ class StorageService {
 
     return (alarmas: alarmas, nextId: nextId);
   }
+
+  /// Guarda el uptime del dispositivo de la sesión actual (ms desde el arranque).
+  Future<void> guardarUptime(int uptimeMs) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(claveUltimoUptime, uptimeMs);
+  }
+
+  /// Devuelve el uptime guardado en la sesión anterior, o null si no existe.
+  Future<int?> cargarUptime() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(claveUltimoUptime);
+  }
+
+  /// Marca el aviso de Inicio automático como atendido.
+  Future<void> guardarAutostartAtendido() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(claveAutostartAtendido, true);
+  }
+
+  /// Devuelve true si el aviso de Inicio automático ya fue atendido.
+  Future<bool> cargarAutostartAtendido() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(claveAutostartAtendido) ?? false;
+  }
 }

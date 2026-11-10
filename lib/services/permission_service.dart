@@ -121,12 +121,32 @@ class PermissionService {
   /// Sin esto, dispositivos Xiaomi/Huawei/Oppo matan el proceso y las alarmas
   /// no suenan. No hay forma de activarlo programáticamente: solo se abre la
   /// pantalla y se instruye al usuario.
-  Future<void> abrirAutostartOEM() async {
-    if (!Platform.isAndroid) return;
+  ///
+  /// Devuelve true solo si se abrió una pantalla REAL del fabricante. Con
+  /// false el usuario acabó en los ajustes genéricos de la app (o no se abrió
+  /// nada) y el aviso no debe darse por atendido.
+  Future<bool> abrirAutostartOEM() async {
+    if (!Platform.isAndroid) return false;
     try {
-      await _canalSistema.invokeMethod('abrirAutostartOEM');
+      return await _canalSistema.invokeMethod<bool>('abrirAutostartOEM') ??
+          false;
     } on PlatformException {
       await openAppSettings();
+      return false;
+    }
+  }
+
+  /// Milisegundos desde el último arranque del dispositivo (uptime).
+  ///
+  /// Se usa para detectar reinicios entre sesiones: si el valor es menor que el
+  /// guardado la sesión anterior, el teléfono se reinició y las alarmas pudieron
+  /// perderse si el OEM no entregó BOOT_COMPLETED. Devuelve null si no aplica.
+  Future<int?> tiempoEncendidoMs() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _canalSistema.invokeMethod<int>('tiempoEncendidoMs');
+    } on PlatformException {
+      return null;
     }
   }
 

@@ -5,12 +5,8 @@ import '../models/alarma.dart';
 import '../utils/constantes.dart';
 
 /// Callback usado al guardar una alarma desde el diálogo.
-typedef GuardarAlarmaCallback = void Function(
-  int hora,
-  int minuto,
-  String etiqueta,
-  List<int> dias,
-);
+typedef GuardarAlarmaCallback =
+    void Function(int hora, int minuto, String etiqueta, List<int> dias);
 
 /// Modal flotante unificado para crear y editar alarmas.
 ///
@@ -26,11 +22,7 @@ class DialogoAlarma extends StatefulWidget {
   /// Callback al guardar. Recibe hora, minuto, etiqueta y días.
   final GuardarAlarmaCallback onGuardar;
 
-  const DialogoAlarma({
-    super.key,
-    this.alarma,
-    required this.onGuardar,
-  });
+  const DialogoAlarma({super.key, this.alarma, required this.onGuardar});
 
   @override
   State<DialogoAlarma> createState() => _DialogoAlarmaState();
@@ -40,7 +32,9 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
   bool _modoConfiguracion = false;
   late TimeOfDay _horaSeleccionada;
   late String _etiqueta;
-  late List<int> _diasSeleccionados;
+
+  /// Días elegidos. Notifier para que solo la zona de chips se reconstruya.
+  late final ValueNotifier<List<int>> _dias;
   final _controladorEtiqueta = TextEditingController();
 
   bool get _esEdicion => widget.alarma != null;
@@ -54,11 +48,11 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
         minute: widget.alarma!.minutoDelDia,
       );
       _etiqueta = widget.alarma!.etiqueta;
-      _diasSeleccionados = List<int>.from(widget.alarma!.diasSemana);
+      _dias = ValueNotifier(List<int>.from(widget.alarma!.diasSemana));
     } else {
       _horaSeleccionada = TimeOfDay.now();
       _etiqueta = '';
-      _diasSeleccionados = [];
+      _dias = ValueNotifier(<int>[]);
     }
     _controladorEtiqueta.text = _etiqueta;
     if (_esEdicion && widget.alarma!.diasSemana.isNotEmpty) {
@@ -69,6 +63,7 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
   @override
   void dispose() {
     _controladorEtiqueta.dispose();
+    _dias.dispose();
     super.dispose();
   }
 
@@ -119,7 +114,7 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
       _horaSeleccionada.hour,
       _horaSeleccionada.minute,
       _controladorEtiqueta.text.trim(),
-      List<int>.from(_diasSeleccionados),
+      List<int>.from(_dias.value),
     );
     HapticFeedback.mediumImpact();
   }
@@ -156,7 +151,9 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                      color: theme.colorScheme.primaryContainer.withValues(
+                        alpha: 0.5,
+                      ),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
@@ -189,8 +186,12 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
-                        theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                        theme.colorScheme.primaryContainer.withValues(
+                          alpha: 0.5,
+                        ),
+                        theme.colorScheme.primaryContainer.withValues(
+                          alpha: 0.3,
+                        ),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(18),
@@ -220,7 +221,9 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                         'Toca para cambiar',
                         style: TextStyle(
                           fontSize: 12,
-                          color: theme.colorScheme.primary.withValues(alpha: 0.6),
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.6,
+                          ),
                         ),
                       ),
                     ],
@@ -235,11 +238,18 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                 // Etiqueta
                 Row(
                   children: [
-                    Icon(Icons.label_outline, size: 18, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.label_outline,
+                      size: 18,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(width: 6),
                     const Text(
                       'Nombre',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -253,8 +263,12 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     filled: true,
-                    fillColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    fillColor: theme.colorScheme.surfaceContainerHighest
+                        .withValues(alpha: 0.3),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                   ),
                 ),
 
@@ -263,84 +277,26 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                 // Días de repetición
                 Row(
                   children: [
-                    Icon(Icons.repeat_outlined, size: 18, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.repeat_outlined,
+                      size: 18,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(width: 6),
                     const Text(
                       'Repetir',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
 
-                // Acceso rápido
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _ChipRapido(
-                      label: 'Lun–Vie',
-                      seleccionado: _diasSeleccionados.length == 5 &&
-                          _diasSeleccionados.contains(1) &&
-                          _diasSeleccionados.contains(5),
-                      onTap: () => setState(() => _diasSeleccionados = [1, 2, 3, 4, 5]),
-                    ),
-                    _ChipRapido(
-                      label: 'Todos',
-                      seleccionado: _diasSeleccionados.length == 7,
-                      onTap: () => setState(() => _diasSeleccionados = [1, 2, 3, 4, 5, 6, 7]),
-                    ),
-                    _ChipRapido(
-                      label: 'Fin de semana',
-                      seleccionado: _diasSeleccionados.length == 2 &&
-                          _diasSeleccionados.contains(6) &&
-                          _diasSeleccionados.contains(7),
-                      onTap: () => setState(() => _diasSeleccionados = [6, 7]),
-                    ),
-                  ],
-                ),
+                _SeccionDias(dias: _dias),
 
-                const SizedBox(height: 10),
-
-                // Días individuales
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: List.generate(7, (i) {
-                    final dia = i + 1;
-                    final activo = _diasSeleccionados.contains(dia);
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (activo) {
-                            _diasSeleccionados.remove(dia);
-                          } else {
-                            _diasSeleccionados.add(dia);
-                            _diasSeleccionados.sort();
-                          }
-                        });
-                        HapticFeedback.lightImpact();
-                      },
-                      child: _ChipDia(
-                        label: nombresDias[i],
-                        activo: activo,
-                      ),
-                    );
-                  }),
-                ),
-
-                const SizedBox(height: 6),
-                Text(
-                  _diasSeleccionados.isEmpty
-                      ? 'Alarma de una sola vez'
-                      : 'Se repite en los días seleccionados',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey[500],
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                // ← NUEVO: Texto informativo sobre confirmación
+                // Texto informativo sobre confirmación
                 const SizedBox(height: 4),
                 Text(
                   'Al cerrar la alarma, sonará nuevamente a los 30 segundos\n'
@@ -378,7 +334,9 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                   // Listo / Configurar / Guardar
                   Expanded(
                     child: FilledButton(
-                      onPressed: _modoConfiguracion ? _guardarCompleto : _guardarSimple,
+                      onPressed: _modoConfiguracion
+                          ? _guardarCompleto
+                          : _guardarSimple,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
@@ -402,7 +360,9 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
                     label: const Text('Repetición y nombre'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
                 ),
@@ -411,6 +371,93 @@ class _DialogoAlarmaState extends State<DialogoAlarma> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Chips rápidos, chips de días y leyenda. Se reconstruye solo al cambiar
+/// los días, sin tocar el resto del diálogo.
+class _SeccionDias extends StatelessWidget {
+  final ValueNotifier<List<int>> dias;
+
+  const _SeccionDias({required this.dias});
+
+  static const _lunVie = [1, 2, 3, 4, 5];
+  static const _todos = [1, 2, 3, 4, 5, 6, 7];
+  static const _finDeSemana = [6, 7];
+
+  static bool _igual(List<int> a, List<int> b) =>
+      a.length == b.length && b.every(a.contains);
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<int>>(
+      valueListenable: dias,
+      builder: (context, seleccion, _) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Acceso rápido
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _ChipRapido(
+                  label: 'Lun–Vie',
+                  seleccionado: _igual(seleccion, _lunVie),
+                  onTap: () => dias.value = List<int>.of(_lunVie),
+                ),
+                _ChipRapido(
+                  label: 'Todos',
+                  seleccionado: seleccion.length == 7,
+                  onTap: () => dias.value = List<int>.of(_todos),
+                ),
+                _ChipRapido(
+                  label: 'Fin de semana',
+                  seleccionado: _igual(seleccion, _finDeSemana),
+                  onTap: () => dias.value = List<int>.of(_finDeSemana),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Días individuales
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: List.generate(7, (i) {
+                final dia = i + 1;
+                final activo = seleccion.contains(dia);
+                return GestureDetector(
+                  onTap: () {
+                    final nueva = List<int>.of(dias.value);
+                    if (nueva.contains(dia)) {
+                      nueva.remove(dia);
+                    } else {
+                      nueva
+                        ..add(dia)
+                        ..sort();
+                    }
+                    dias.value = nueva;
+                    HapticFeedback.lightImpact();
+                  },
+                  child: _ChipDia(label: nombresDias[i], activo: activo),
+                );
+              }),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              seleccion.isEmpty
+                  ? 'Alarma de una sola vez'
+                  : 'Se repite en los días seleccionados',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey[500],
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -432,7 +479,9 @@ class _ChipRapido extends StatelessWidget {
     return ActionChip(
       label: Text(label, style: const TextStyle(fontSize: 12)),
       backgroundColor: seleccionado
-          ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.7)
+          ? Theme.of(
+              context,
+            ).colorScheme.primaryContainer.withValues(alpha: 0.7)
           : null,
       side: BorderSide(
         color: seleccionado
@@ -460,7 +509,9 @@ class _ChipDia extends StatelessWidget {
       decoration: BoxDecoration(
         color: activo
             ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+            : Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: activo
@@ -474,7 +525,9 @@ class _ChipDia extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: activo ? FontWeight.w700 : FontWeight.w500,
-            color: activo ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+            color: activo
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ),

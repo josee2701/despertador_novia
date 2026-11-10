@@ -1,0 +1,72 @@
+name: Publicar en Google Play
+
+# main      -> producción
+# developer -> pista de pruebas internas
+on:
+  push:
+    branches: [main, developer]
+
+# Dos publicaciones a la vez se pisarían el versionCode.
+concurrency:
+  group: publicar-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    # Para exigir aprobación manual antes de producción, crea el entorno
+    # "produccion" en Settings -> Environments y marca "Required reviewers".
+    environment: ${{ github.ref_name == 'main' && 'produccion' || 'pruebas' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Puerta de calidad del proyecto (AGENTS.md §2).
+      - run: flutter analyze
+      - run: flutter test
+
+      # build.gradle.kts lee android/key.properties; storeFile debe ser absoluta.
+      - name: Preparar firma
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
+      # Play exige un versionCode creciente. pubspec está en +7; run_number + 1000
+      # garantiza que siempre supere lo ya subido.
+      # shortcut: versionCode ligado al run de CI; si subes un AAB a mano, usa > 1000 + último run.
+      - name: Compilar AAB
+        run: flutter build appbundle --release --build-number=$((1000 + GITHUB_RUN_NUMBER))
+
+      - name: Subir a Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SA_JSON }}
+          packageName: com.soy.josec.bella_durmiente
+          releaseFiles: build/app/outputs/bundle/release/app-release.aab
+          track: ${{ github.ref_name == 'main' && 'production' || 'internal' }}
+          status: completed
+
+      - name: Borrar firma
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" android/key.properties
