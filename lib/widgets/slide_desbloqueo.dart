@@ -56,7 +56,13 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
   /// Radio del control redondo, para no dejarlo salir de la zona visible.
   static const double _radioControl = 32.0;
   late Offset _direccionObjetivo;
-  Offset _arrastre = Offset.zero;
+
+  /// Arrastre REAL acumulado. Es un notifier y no estado del widget para que
+  /// cada frame de arrastre (o de la animación de reset) reconstruya solo el
+  /// control y la barra de progreso, no el fondo ni la jerarquía entera.
+  final ValueNotifier<Offset> _arrastreNotifier = ValueNotifier(Offset.zero);
+  Offset get _arrastre => _arrastreNotifier.value;
+  set _arrastre(Offset valor) => _arrastreNotifier.value = valor;
   Offset _arrastreInicial = Offset.zero;
   bool _completado = false;
   late AnimationController _animacionReset;
@@ -67,21 +73,21 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
     super.initState();
     _direccionObjetivo = direccionAleatoria();
     _notificarDireccion();
-    _animacionReset = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    )..addListener(() {
-        if (_animacionReset.isAnimating) {
-          setState(() {
+    _animacionReset =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 300),
+        )..addListener(() {
+          if (_animacionReset.isAnimating) {
             _arrastre = _arrastreInicial * (1.0 - _animacionReset.value);
-          });
-        }
-      });
+          }
+        });
   }
 
   @override
   void dispose() {
     _animacionReset.dispose();
+    _arrastreNotifier.dispose();
     super.dispose();
   }
 
@@ -107,9 +113,7 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
       _arrastreInicial = Offset.zero;
     }
 
-    setState(() {
-      _arrastre += details.delta;
-    });
+    _arrastre += details.delta;
 
     final progreso = _calcularProgreso();
     if (progreso > 0.5 && progreso < 0.55) {
@@ -146,7 +150,8 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
   }
 
   double _calcularProgreso() {
-    final dot = _arrastre.dx * _direccionObjetivo.dx +
+    final dot =
+        _arrastre.dx * _direccionObjetivo.dx +
         _arrastre.dy * _direccionObjetivo.dy;
 
     if (_anchoDisponible == 0) return 0.0;
@@ -185,8 +190,6 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
     return LayoutBuilder(
       builder: (context, constraints) {
         _anchoDisponible = constraints.maxWidth;
-        final progreso = _calcularProgreso();
-
         return GestureDetector(
           onPanUpdate: _onPanUpdate,
           onPanEnd: _onPanEnd,
@@ -197,22 +200,34 @@ class _SlideDesbloqueoState extends State<SlideDesbloqueo>
               alignment: Alignment.center,
               children: [
                 // Línea sutil de progreso (invisible hasta que se arrastra)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 100),
-                  width: _anchoDisponible * 0.8 * progreso,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: _colorProgreso(progreso).withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+                ValueListenableBuilder<Offset>(
+                  valueListenable: _arrastreNotifier,
+                  builder: (context, _, _) {
+                    final progreso = _calcularProgreso();
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 100),
+                      width: _anchoDisponible * 0.8 * progreso,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: _colorProgreso(progreso).withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    );
+                  },
                 ),
 
-                // Control deslizante (visible desde el inicio)
+                // Control deslizante (visible desde el inicio). El aspecto es
+                // estático (`child`, se construye una sola vez); solo el
+                // desplazamiento depende del arrastre.
                 AnimatedOpacity(
                   opacity: _completado ? 0.0 : 1.0,
                   duration: const Duration(milliseconds: 300),
-                  child: Transform.translate(
-                    offset: _desplazamientoVisual,
+                  child: ValueListenableBuilder<Offset>(
+                    valueListenable: _arrastreNotifier,
+                    builder: (context, _, hijo) => Transform.translate(
+                      offset: _desplazamientoVisual,
+                      child: hijo,
+                    ),
                     child: Container(
                       width: 64,
                       height: 64,
