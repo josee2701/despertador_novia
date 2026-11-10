@@ -64,20 +64,6 @@ void main() {
     });
   });
 
-  group('periodo', () {
-    test('AM para hora antes de mediodía', () {
-      expect(utils.periodo(DateTime(2026, 1, 1, 8, 0)), 'AM');
-    });
-
-    test('PM para hora después de mediodía', () {
-      expect(utils.periodo(DateTime(2026, 1, 1, 15, 0)), 'PM');
-    });
-
-    test('AM para medianoche', () {
-      expect(utils.periodo(DateTime(2026, 1, 1, 0, 0)), 'AM');
-    });
-  });
-
   group('partesHora12h', () {
     test('medianoche exacta', () {
       expect(utils.partesHora12h(DateTime(2026, 1, 1, 0, 0)),
@@ -186,24 +172,6 @@ void main() {
             dir == const Offset(0, -1));
         expect(esValida, isTrue, reason: 'Dirección inválida: $dir');
       }
-    });
-  });
-
-  group('iconoDireccion', () {
-    test('derecha', () {
-      expect(utils.iconoDireccion(const Offset(1, 0)), Icons.arrow_forward);
-    });
-
-    test('izquierda', () {
-      expect(utils.iconoDireccion(const Offset(-1, 0)), Icons.arrow_back);
-    });
-
-    test('abajo', () {
-      expect(utils.iconoDireccion(const Offset(0, 1)), Icons.arrow_downward);
-    });
-
-    test('arriba', () {
-      expect(utils.iconoDireccion(const Offset(0, -1)), Icons.arrow_upward);
     });
   });
 

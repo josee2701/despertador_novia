@@ -33,9 +33,9 @@ class AlarmService {
 
   /// Crea la configuración nativa a partir de un modelo [Alarma].
   ///
-  /// El [stopButton] llama a [Alarm.stop] internamente (no pasa por nuestro
-  /// presenter). Por eso [onAppResumed] verifica con [alarmIsRinging] si la
-  /// alarma sigue sonando al volver a foreground y reprograma si es recurrente.
+  /// Sin `stopButton` a propósito: ese botón llamaba a [Alarm.stop] en nativo
+  /// sin pasar por el presenter, saltándose el deslizamiento, la confirmación
+  /// y la reprogramación de las recurrentes.
   AlarmSettings crearConfiguracion(Alarma alarma) {
     final horaTexto = formatearHoraAMPM(
       DateTime(2000, 1, 1, alarma.horaDelDia, alarma.minutoDelDia),
@@ -53,7 +53,6 @@ class AlarmService {
         body: alarma.pospuesta
             ? '${alarma.etiqueta} — Pospuesta (${formatearHoraAMPM(alarma.hora)})'
             : '${alarma.etiqueta} — $horaTexto',
-        stopButton: 'Detener',
       ),
       loopAudio: true,
       vibrate: true,
@@ -63,7 +62,7 @@ class AlarmService {
       // CRÍTICO: por defecto el package detiene la alarma cuando el usuario quita
       // la app de "Recientes" (onTaskRemoved → stopSelf), apagando el sonido a
       // los 1-2s. Con false el foreground service sigue sonando aunque se quite
-      // la app de Recientes. El botón "Detener" de la notificación sigue funcionando.
+      // la app de Recientes.
       androidStopAlarmOnTermination: false,
     );
   }

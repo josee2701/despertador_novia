@@ -166,6 +166,7 @@ class LogService {
       try {
         final archivo = await _obtenerArchivo();
         await archivo.writeAsString('');
+        _lineasEstimadas = 0;
       } catch (e) {
         debugPrint('LogService.limpiar error: $e');
       }

@@ -364,6 +364,62 @@ void main() {
     });
   });
 
+  // ── alarmaQueColisiona ─────────────────────────────────────────────────────
+
+  group('alarmaQueColisiona (Alarm.set cancela la otra del mismo segundo)', () {
+    test('misma hora y mismos días colisiona', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [1, 2, 3])]);
+      expect(
+          presenter.alarmaQueColisiona(hora: 7, minuto: 0, diasSemana: [3])?.id,
+          1);
+    });
+
+    test('dos de una sola vez a la misma hora colisionan', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [])]);
+      expect(
+          presenter.alarmaQueColisiona(hora: 7, minuto: 0, diasSemana: []),
+          isNotNull);
+    });
+
+    test('una vez + recurrente que incluye ese día colisionan', () async {
+      await arrancar(alarmas: [
+        _alarmaSimple(id: 1, diasSemana: [1, 2, 3, 4, 5, 6, 7]),
+      ]);
+      expect(
+          presenter.alarmaQueColisiona(hora: 7, minuto: 0, diasSemana: []),
+          isNotNull);
+    });
+
+    test('otro minuto no colisiona', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [])]);
+      expect(
+          presenter.alarmaQueColisiona(hora: 7, minuto: 1, diasSemana: []),
+          isNull);
+    });
+
+    test('misma hora en días distintos no colisiona', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [1, 2, 3, 4, 5])]);
+      expect(
+          presenter.alarmaQueColisiona(hora: 7, minuto: 0, diasSemana: [6, 7]),
+          isNull);
+    });
+
+    test('las inactivas no cuentan', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, activa: false)]);
+      expect(
+          presenter.alarmaQueColisiona(hora: 7, minuto: 0, diasSemana: []),
+          isNull);
+    });
+
+    test('la propia alarma (editar/reactivar) no cuenta', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 1, diasSemana: [])]);
+      expect(
+          presenter.alarmaQueColisiona(
+              hora: 7, minuto: 0, diasSemana: [], excluirId: 1),
+          isNull);
+    });
+  });
+
   // ── toggleAlarma ───────────────────────────────────────────────────────────
 
   group('toggleAlarma', () {
@@ -385,6 +441,23 @@ void main() {
 
       await presenter.toggleAlarma(presenter.alarmas.first, true);
       expect(presenter.alarmas.first.pospuesta, isFalse);
+    });
+
+    test('reactivar tras desactivar en la ventana de confirmación limpia '
+        'confirmacionPendiente', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 7, diasSemana: [])]);
+      final a = presenter.alarmas.first;
+      await presenter.cerrarConConfirmacion(a);
+      expect(a.confirmacionPendiente, isTrue);
+
+      await presenter.toggleAlarma(a, false);
+      expect(a.confirmacionPendiente, isFalse);
+      await presenter.toggleAlarma(a, true);
+
+      expect(a.confirmacionPendiente, isFalse,
+          reason: 'Si queda en true, el primer deslizamiento del próximo '
+              'disparo apaga del todo sin confirmar');
+      expect(a.pospuesta, isFalse);
     });
 
     test('desactivar detiene la alarma nativa', () async {
@@ -750,15 +823,37 @@ void main() {
           reason: 'La alarma de las 07:00 de 2030 sí tiene recordatorio');
 
       final dentroDe10Min = DateTime.now().add(const Duration(minutes: 10));
-      await presenter.actualizarHora(
-        presenter.alarmas.first,
-        dentroDe10Min.hour,
-        dentroDe10Min.minute,
+      await presenter.actualizarAlarmaCompleta(
+        alarma: presenter.alarmas.first,
+        nuevaHora: dentroDe10Min.hour,
+        nuevoMinuto: dentroDe10Min.minute,
       );
 
       expect(recordatorio.programados, isNot(contains(40)),
           reason: 'Ya no procede avisar "suena en 30 minutos": el aviso de la '
               'hora anterior tiene que desaparecer, no quedarse');
+    });
+
+    test('editar la hora de una alarma pospuesta limpia pospuesta y '
+        'programa el recordatorio', () async {
+      await arrancar(alarmas: [_alarmaSimple(id: 41, diasSemana: [])]);
+      final a = presenter.alarmas.first;
+      await presenter.posponerAlarma(a);
+      expect(a.pospuesta, isTrue);
+      expect(recordatorio.programados, isNot(contains(41)));
+
+      final dentroDe3h = DateTime.now().add(const Duration(hours: 3));
+      await presenter.actualizarAlarmaCompleta(
+        alarma: a,
+        nuevaHora: dentroDe3h.hour,
+        nuevoMinuto: dentroDe3h.minute,
+      );
+
+      expect(a.pospuesta, isFalse,
+          reason: 'La hora del snooze se descartó: el punto naranja sobra');
+      expect(a.confirmacionPendiente, isFalse);
+      expect(recordatorio.programados, contains(41),
+          reason: 'Con pospuesta pegada en true el aviso previo se omitía');
     });
   });
 
@@ -1617,6 +1712,42 @@ void main() {
               'alarmIsRinging, igual que si hubiera llegado más tarde');
       expect(view.ultimaAlarmaRinging, isNotNull,
           reason: 'Y mostrar su pantalla completa');
+    });
+
+    test('la escucha de ringing está activa ANTES de que terminen los permisos',
+        () async {
+      // Arranque provocado por la alarma: la pantalla con el deslizador no
+      // puede esperar a que alguien cierre el diálogo de batería.
+      final permisos = FakePermissionService()..exentoBateria = false;
+      final dialogo = Completer<void>();
+      permisos.alSolicitarExencionBateria = () => dialogo.future;
+      storage.precargar([_alarmaSimple(id: 83, diasSemana: [1, 2, 3, 4, 5])]);
+      alarm.sonandoIds.add(83);
+      presenter = AlarmasPresenter(
+        view: view,
+        alarmService: alarm,
+        storageService: storage,
+        permissionService: permisos,
+        recordatorioService: recordatorio,
+        registro: eventosLog.add,
+      );
+
+      final arranque = presenter.iniciar();
+      await Future<void>.delayed(Duration.zero);
+      alarm.ringingController.add(AlarmSet([_settingsDummy(83)]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(view.ultimaAlarmaRinging?.id, 83,
+          reason: 'Con el diálogo de permisos todavía abierto, la alarma que '
+              'abrió la app ya debe estar en pantalla completa');
+      expect(presenter.timerActivo, isTrue);
+
+      // Un resume del diálogo sigue difiriéndose hasta el final.
+      await presenter.onAppResumed();
+      expect(presenter.resumePendiente, isTrue);
+      dialogo.complete();
+      await arranque;
+      expect(presenter.resumePendiente, isFalse);
     });
 
     test('dos onAppResumed simultáneos auditan una sola vez', () async {

@@ -38,6 +38,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   bool _animarFAB = false;
   Alarma? _alarmaRinging;
 
+  /// Ruta de `PantallaAlarmaActiva` que empujó [onMostrarPantallaAlarma], para
+  /// poder cerrar SOLO esa si la alarma se detiene desde fuera.
+  Route<void>? _rutaAlarma;
+
   @override
   void initState() {
     super.initState();
@@ -113,14 +117,23 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
 
   @override
   void onAlarmaActualizada() {
-    if (mounted) {
-      setState(() {
-        // Si la alarma ya no está sonando (detenida externamente), cerrar el banner.
-        if (!_presenter.hayAlarmaSonando) {
-          _alarmaRinging = null;
-        }
-      });
+    if (!mounted) return;
+    // Detenida externamente con la pantalla de alarma abierta: sin esto queda
+    // encima, muda y con atrás bloqueado, y deslizarla programaría una
+    // re-sonada de una alarma ya apagada. En el flujo normal la propia
+    // pantalla ya hizo pop antes de llegar aquí, así que `isActive` es false
+    // y no se cierra dos veces. removeRoute quita solo esa ruta.
+    final ruta = _rutaAlarma;
+    if (!_presenter.hayAlarmaSonando && ruta != null) {
+      _rutaAlarma = null;
+      if (ruta.isActive) Navigator.of(context).removeRoute(ruta);
     }
+    setState(() {
+      // Si la alarma ya no está sonando (detenida externamente), cerrar el banner.
+      if (!_presenter.hayAlarmaSonando) {
+        _alarmaRinging = null;
+      }
+    });
   }
 
   @override
@@ -156,21 +169,17 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
   void onMostrarPantallaAlarma(Alarma alarma) {
     if (!mounted) return;
 
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        fullscreenDialog: true,
-        barrierColor: Colors.transparent,
-        pageBuilder: (ctx, animation, secondaryAnimation) =>
-            PantallaAlarmaActiva(
-              alarma: alarma,
-              onDetener: () => _presenter.detenerAlarma(alarma),
-              onPosponer: () => _presenter.posponerAlarma(alarma),
-              onCerrarConConfirmacion: () =>
-                  _presenter.cerrarConConfirmacion(alarma), // ← NUEVO
-            ),
+    final ruta = _rutaAlarma = PageRouteBuilder<void>(
+      fullscreenDialog: true,
+      barrierColor: Colors.transparent,
+      pageBuilder: (ctx, animation, secondaryAnimation) => PantallaAlarmaActiva(
+        alarma: alarma,
+        onDetener: () => _presenter.detenerAlarma(alarma),
+        onPosponer: () => _presenter.posponerAlarma(alarma),
+        onCerrarConConfirmacion: () => _presenter.cerrarConConfirmacion(alarma),
       ),
     );
+    Navigator.push(context, ruta);
   }
 
   @override
@@ -190,6 +199,7 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
       builder: (ctx) => DialogoAlarma(
         onGuardar: (hora, minuto, etiqueta, dias) async {
           Navigator.pop(ctx);
+          if (_avisarSiColisiona(hora, minuto, dias)) return;
           await _presenter.agregarAlarma(
             hora: hora,
             minuto: minuto,
@@ -211,6 +221,10 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         alarma: alarma,
         onGuardar: (hora, minuto, etiqueta, dias) async {
           Navigator.pop(ctx);
+          if (alarma.activa &&
+              _avisarSiColisiona(hora, minuto, dias, excluirId: alarma.id)) {
+            return;
+          }
           await _presenter.actualizarAlarmaCompleta(
             alarma: alarma,
             nuevaHora: hora,
@@ -221,6 +235,31 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
         },
       ),
     );
+  }
+
+  /// Si guardar dejaría dos alarmas activas en el mismo minuto, avisa y
+  /// devuelve true: el package cancelaría una de las dos en silencio.
+  bool _avisarSiColisiona(int hora, int minuto, List<int> dias,
+      {int? excluirId}) {
+    final otra = _presenter.alarmaQueColisiona(
+      hora: hora,
+      minuto: minuto,
+      diasSemana: dias,
+      excluirId: excluirId,
+    );
+    if (otra == null || !mounted) return otra != null;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Ya tienes "${otra.etiqueta}" a esa hora y solo '
+              'sonaría una. Elige otro minuto.'),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    return true;
   }
 
   /// Elimina una alarma con opción de deshacer (SnackBar).
@@ -375,11 +414,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                 final alarma = _alarmaRinging!;
                 setState(() => _alarmaRinging = null);
                 _presenter.mostrarPantallaAlarmaDesdeBanner(alarma);
-              },
-              onDetener: () {
-                final alarma = _alarmaRinging!;
-                setState(() => _alarmaRinging = null);
-                _presenter.detenerAlarma(alarma);
               },
               onPosponer: () {
                 final alarma = _alarmaRinging!;
@@ -559,6 +593,12 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
                           child: TarjetaAlarma(
                             alarma: alarma,
                             onToggle: (v) {
+                              if (v &&
+                                  _avisarSiColisiona(alarma.horaDelDia,
+                                      alarma.minutoDelDia, alarma.diasSemana,
+                                      excluirId: alarma.id)) {
+                                return;
+                              }
                               _presenter.toggleAlarma(alarma, v);
                               HapticFeedback.selectionClick();
                             },
@@ -645,18 +685,18 @@ class _FABAnimadoState extends State<_FABAnimado>
 
 /// Banner que aparece cuando la alarma suena mientras la app está en primer plano.
 ///
-/// Muestra un aviso sutil en la parte superior con opciones para ver,
-/// detener o posponer la alarma. No bloquea la pantalla actual.
+/// Muestra un aviso sutil en la parte superior con opciones para ver o
+/// posponer la alarma. No bloquea la pantalla actual. A propósito NO hay
+/// "Detener": apagarla de un toque saltaría el deslizamiento y la
+/// confirmación de despertar; para eso está "Ver".
 class _BannerAlarmaSonando extends StatefulWidget {
   final Alarma alarma;
   final VoidCallback onVer;
-  final VoidCallback onDetener;
   final VoidCallback onPosponer;
 
   const _BannerAlarmaSonando({
     required this.alarma,
     required this.onVer,
-    required this.onDetener,
     required this.onPosponer,
   });
 
@@ -748,40 +788,24 @@ class _BannerAlarmaSonandoState extends State<_BannerAlarmaSonando>
               ],
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onPosponer,
-                    icon: const Icon(Icons.snooze, size: 16),
-                    label: const Text('5 min'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(
-                        context,
-                      ).colorScheme.onPrimaryContainer,
-                      side: BorderSide(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.primary.withValues(alpha: 0.3),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                    ),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: widget.onPosponer,
+                icon: const Icon(Icons.snooze, size: 16),
+                label: const Text('5 min'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onPrimaryContainer,
+                  side: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: 0.3),
                   ),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: widget.onDetener,
-                    icon: const Icon(Icons.stop, size: 16),
-                    label: const Text('Detener'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),

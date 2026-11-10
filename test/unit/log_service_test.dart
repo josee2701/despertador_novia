@@ -48,6 +48,26 @@ void main() {
         reason: 'debe descartar los eventos más antiguos');
   });
 
+  test('limpiar reinicia el conteo: una escritura posterior no recorta',
+      () async {
+    // maxLineas 5, margen 2 → recorta al superar 7 líneas.
+    final log = LogService.paraPruebas(archivo, maxLineas: 5, margenRecorte: 2);
+
+    for (var i = 0; i < 6; i++) {
+      await log.registrar('antes $i');
+    }
+    await log.limpiar();
+
+    // Si el conteo no se reiniciara, 6 + 2 = 8 superaría el umbral.
+    await log.registrar('despues 0');
+    await log.registrar('despues 1');
+
+    expect(log.recortesRealizados, 0);
+    final contenido = await log.leerLog();
+    expect(contenido.contains('antes 0'), isFalse);
+    expect(contenido.contains('despues 1'), isTrue);
+  });
+
   test('no recorta mientras no se supera el umbral', () async {
     final log = LogService.paraPruebas(archivo, maxLineas: 5, margenRecorte: 2);
 

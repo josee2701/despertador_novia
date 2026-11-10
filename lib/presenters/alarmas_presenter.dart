@@ -100,9 +100,9 @@ class AlarmasPresenter {
   ///
   /// `iniciar()` abre diálogos del sistema (notificaciones, exención de
   /// batería). Al cerrarlos llega `resumed` y la vista llama a [onAppResumed]
-  /// EN PARALELO con el resto de `iniciar()`, antes de que la escucha de
-  /// `Alarm.ringing` exista. Auditar y normalizar sobre ese estado a medio
-  /// construir puede cancelar como huérfana una alarma que está sonando.
+  /// EN PARALELO con el resto de `iniciar()`. Auditar y normalizar sobre ese
+  /// estado a medio construir puede cancelar como huérfana una alarma que
+  /// está sonando.
   bool _iniciado = false;
 
   /// Guardia de reentrada de [onAppResumed]: dos `resumed` encadenados no
@@ -201,6 +201,19 @@ class AlarmasPresenter {
     try {
       await _detectarReinicio();
       await _cargarAlarmas();
+    } catch (e) {
+      _log('⚠ ERROR durante el arranque: $e — la app continúa con el reloj '
+          'y la escucha de alarmas');
+    }
+    // Reloj y escucha ANTES de los diálogos de permisos: en un arranque
+    // provocado por la alarma, la pantalla con el deslizador no puede esperar
+    // a que alguien cierre el diálogo de batería. La lista y
+    // _idsSonandoAlArrancar ya están cargados; `_iniciado` sigue en false
+    // hasta el final, así que un `resumed` de esos diálogos se sigue
+    // difiriendo.
+    _iniciarTimer();
+    _iniciarEscuchaRinging();
+    try {
       await _verificarPermisoAlarmasExactas();
       await _verificarPermisoNotificaciones();
       await _verificarModoNoMolestar();
@@ -225,8 +238,6 @@ class AlarmasPresenter {
       _log('⚠ ERROR durante el arranque: $e — la app continúa con el reloj '
           'y la escucha de alarmas');
     }
-    _iniciarTimer();
-    _iniciarEscuchaRinging();
     _iniciado = true;
     // Un `resumed` que llegó mientras esto seguía en vuelo NO se descarta: se
     // difiere hasta aquí, con la lista cargada y la escucha de `Alarm.ringing`
@@ -890,11 +901,46 @@ class AlarmasPresenter {
     _view.onAlarmaAgregada();
   }
 
+  /// Devuelve otra alarma ACTIVA que sonaría en el mismo minuto que
+  /// [hora]:[minuto] con [diasSemana], o null si no hay choque.
+  ///
+  /// `Alarm.set` del package detiene en silencio cualquier otra alarma con el
+  /// mismo segundo de disparo, y `proximaFecha` siempre da segundos 0: dos
+  /// alarmas a la misma hora dejan una cancelada aunque la lista muestre las
+  /// dos activas. Se compara por días y no solo por el próximo disparo,
+  /// porque "7:00 Lun–Vie" y "7:00 una vez el miércoles" chocan el miércoles
+  /// aunque hoy sea lunes. Una alarma de una sola vez cuenta con el día de su
+  /// próximo disparo. [excluirId] es la propia alarma al editar/reactivar.
+  ///
+  /// La vista lo consulta antes de crear, editar o activar, y no guarda si hay
+  /// choque.
+  Alarma? alarmaQueColisiona({
+    required int hora,
+    required int minuto,
+    required List<int> diasSemana,
+    int? excluirId,
+  }) {
+    Set<int> dias(int h, int m, List<int> d) =>
+        d.isEmpty ? {proximaFecha(h, m, d).weekday} : d.toSet();
+    final mios = dias(hora, minuto, diasSemana);
+    return _alarmas.where((a) =>
+        a.activa &&
+        a.id != excluirId &&
+        a.horaDelDia == hora &&
+        a.minutoDelDia == minuto &&
+        dias(a.horaDelDia, a.minutoDelDia, a.diasSemana)
+            .intersection(mios)
+            .isNotEmpty).firstOrNull;
+  }
+
   /// Activa o desactiva una alarma existente.
   Future<void> toggleAlarma(Alarma alarma, bool activa) async {
+    // En las dos ramas: un snooze o una confirmación a medias no sobreviven a
+    // un apagado/encendido (si no, el primer deslizamiento ya apaga del todo).
+    alarma.pospuesta = false;
+    alarma.confirmacionPendiente = false;
     if (activa) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
-      alarma.pospuesta = false;
       await _alarmService.programar(alarma);
       await _recordatorioService.programar(alarma);
     } else {
@@ -932,50 +978,6 @@ class AlarmasPresenter {
     _view.onAlarmaAgregada();
   }
 
-  /// Actualiza la hora de una alarma y la reprograma.
-  Future<void> actualizarHora(Alarma alarma, int nuevaHora, int nuevoMinuto) async {
-    alarma.horaDelDia = nuevaHora;
-    alarma.minutoDelDia = nuevoMinuto;
-    // proximaFecha respeta los días de repetición, evitando que la alarma
-    // caiga en un día no seleccionado.
-    alarma.hora = proximaFecha(nuevaHora, nuevoMinuto, alarma.diasSemana);
-    if (alarma.activa) {
-      await _alarmService.programar(alarma);
-      // Deja el recordatorio con la hora nueva, o ninguno si ya no procede:
-      // programar() se encarga de retirar el anterior en ese caso.
-      await _recordatorioService.programar(alarma);
-    }
-    await _guardarAlarmas();
-    _view.onAlarmaActualizada();
-  }
-
-  /// Actualiza la etiqueta de una alarma y la reprograma si está activa.
-  Future<void> actualizarEtiqueta(Alarma alarma, String nuevaEtiqueta) async {
-    alarma.etiqueta = nuevaEtiqueta.trim().isEmpty ? 'Alarma' : nuevaEtiqueta.trim();
-    if (alarma.activa) {
-      await _alarmService.programar(alarma);
-      // Reprograma el recordatorio para que muestre la etiqueta actualizada.
-      await _recordatorioService.programar(alarma);
-    }
-    await _guardarAlarmas();
-    _view.onAlarmaActualizada();
-  }
-
-  /// Actualiza los días de repetición de una alarma y la reprograma.
-  Future<void> actualizarDiasSemana(Alarma alarma, List<int> nuevosDias) async {
-    alarma.diasSemana = nuevosDias;
-
-    if (alarma.activa) {
-      alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, nuevosDias);
-      await _alarmService.programar(alarma);
-      // Actualiza el recordatorio con la nueva próxima fecha de disparo.
-      await _recordatorioService.programar(alarma);
-    }
-
-    await _guardarAlarmas();
-    _view.onAlarmaActualizada();
-  }
-
   /// Actualiza todos los campos de una alarma de una vez.
   Future<void> actualizarAlarmaCompleta({
     required Alarma alarma,
@@ -1000,6 +1002,9 @@ class AlarmasPresenter {
     // Recalcular próximo disparo si cambió la hora o los días.
     if ((nuevaHora != null && nuevoMinuto != null) || nuevosDias != null) {
       alarma.hora = proximaFecha(alarma.horaDelDia, alarma.minutoDelDia, alarma.diasSemana);
+      // La hora temporal del snooze/confirmación se acaba de descartar.
+      alarma.pospuesta = false;
+      alarma.confirmacionPendiente = false;
     }
 
     if (alarma.activa) {

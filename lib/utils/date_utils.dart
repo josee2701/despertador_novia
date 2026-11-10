@@ -53,9 +53,6 @@ IconData iconoSegunHora(int hora) {
   return Icons.nights_stay_outlined;
 }
 
-/// Devuelve 'AM' o 'PM' según la hora.
-String periodo(DateTime dt) => dt.hour < 12 ? 'AM' : 'PM';
-
 /// Devuelve la descripción del tiempo restante hasta [alarma].
 ///
 /// Devuelve un string del tipo "en 2h 15min" o "en 30min".
@@ -85,14 +82,6 @@ Offset direccionAleatoria() {
     2 => const Offset(0, 1),
     _ => const Offset(0, -1),
   };
-}
-
-/// Devuelve el ícono de flecha correspondiente a la dirección del vector.
-IconData iconoDireccion(Offset direccion) {
-  if (direccion.dx == 1) return Icons.arrow_forward;
-  if (direccion.dx == -1) return Icons.arrow_back;
-  if (direccion.dy == 1) return Icons.arrow_downward;
-  return Icons.arrow_upward;
 }
 
 /// Texto descriptivo de la dirección para instrucciones al usuario.

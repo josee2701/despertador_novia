@@ -151,6 +151,8 @@ class AppOpenAdManager {
 
     _mostrando = true;
     ad.fullScreenContentCallback = FullScreenContentCallback(
+      // Solo cuenta para el tope de 4 h si el anuncio llegó a verse.
+      onAdShowedFullScreenContent: (_) => registrarMostrado(),
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _ad = null;
@@ -169,7 +171,6 @@ class AppOpenAdManager {
         cargar(); // precarga el siguiente
       },
     );
-    registrarMostrado();
     ad.show();
   }
 

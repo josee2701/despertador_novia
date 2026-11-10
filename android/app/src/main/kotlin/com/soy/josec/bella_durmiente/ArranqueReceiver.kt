@@ -38,6 +38,10 @@ class ArranqueReceiver : BroadcastReceiver() {
          * mañana. Por eso se saltan aquí.
          */
         private const val OFFSET_RECORDATORIO_HEREDADO = 10000
+
+        /** Criterio puro: ni recordatorios heredados ni alarmas con fecha pasada. */
+        fun debeReprogramar(id: Int, fechaMs: Long, ahoraMs: Long): Boolean =
+            id <= OFFSET_RECORDATORIO_HEREDADO && fechaMs > ahoraMs
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -76,23 +80,12 @@ class ArranqueReceiver : BroadcastReceiver() {
         val ahora = System.currentTimeMillis()
         val api = AlarmApiImpl(context)
         for (alarma in alarmas) {
-            if (alarma.id > OFFSET_RECORDATORIO_HEREDADO) {
+            if (!debeReprogramar(alarma.id, alarma.dateTime.time, ahora)) {
                 Log.i(
                     TAG,
-                    "Recordatorio heredado ${alarma.id} omitido: la app ya no " +
-                        "programa avisos como alarmas"
-                )
-                continue
-            }
-            // AlarmApiImpl.setAlarm calcula delayInSeconds negativo para una
-            // fecha pasada, cae en la rama `<= 5` y llama a
-            // handleImmediateAlarm: la alarma sonaría AHORA, a todo volumen,
-            // en el momento en que Play Store actualice la app.
-            if (alarma.dateTime.time <= ahora) {
-                Log.i(
-                    TAG,
-                    "Alarma ${alarma.id} omitida: su fecha ya pasó y " +
-                        "reprogramarla la haría sonar de inmediato"
+                    "Alarma ${alarma.id} omitida: recordatorio heredado (la app " +
+                        "ya no programa avisos como alarmas) o fecha ya pasada " +
+                        "(reprogramarla la haría sonar de inmediato)"
                 )
                 continue
             }
