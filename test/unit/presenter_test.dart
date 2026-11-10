@@ -240,8 +240,6 @@ class FakeView implements AlarmasView {
   @override
   void onAutostartRecomendado(bool recomendado) =>
       autostartRecomendado = recomendado;
-  @override
-  BuildContext getContext() => throw UnimplementedError();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

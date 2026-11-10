@@ -28,7 +28,6 @@ abstract class AlarmasView {
   void onAutostartRecomendado(bool recomendado);
   void onMostrarPantallaAlarma(Alarma alarma);
   void onAlarmaSonandoEnForeground(Alarma alarma);
-  BuildContext getContext();
 }
 
 /// Presenter del patrón MVP para la pantalla de alarmas.

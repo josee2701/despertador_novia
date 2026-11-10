@@ -179,9 +179,6 @@ class _PantallaAlarmasState extends State<PantallaAlarmas>
     setState(() => _alarmaRinging = alarma);
   }
 
-  @override
-  BuildContext getContext() => context;
-
   // ─── Acciones del usuario ───────────────────────────────────────
 
   /// Abre el diálogo unificado para crear una nueva alarma.
