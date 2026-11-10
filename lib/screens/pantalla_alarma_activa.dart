@@ -65,16 +65,19 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     super.dispose();
   }
 
-  /// Cierra esta pantalla. Hoy la ruta siempre se abre con push, pero si
-  /// algún día fuera la raíz, `pop` dejaría la app en negro: en ese caso se
-  /// cierra la app.
+  /// Cierra esta pantalla. La ruta siempre se abre con `push` sobre
+  /// `PantallaAlarmas`, así que `canPop()` es true; la guarda solo evita un
+  /// `pop` de la ruta raíz.
+  ///
+  /// Deliberadamente NO hay respaldo con `SystemNavigator.pop()`: quienes nos
+  /// llaman lanzan métodos async del presenter sin esperarlos (p. ej.
+  /// `cerrarConConfirmacion` detiene, reprograma a +30 s y guarda), y cerrar
+  /// la actividad aquí podría matar el aislado antes de programar la
+  /// re-sonada de confirmación.
   void _cerrarPantallaAlarma() {
     if (!mounted) return;
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    } else {
-      SystemNavigator.pop();
-    }
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) navigator.pop();
   }
 
   void _detener() {
