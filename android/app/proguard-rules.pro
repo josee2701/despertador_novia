@@ -42,3 +42,8 @@
 -keep class com.gdelataillade.alarm.services.AlarmStorage { *; }
 -keep class com.gdelataillade.alarm.api.AlarmApiImpl { *; }
 -keep class com.gdelataillade.alarm.models.** { *; }
+
+# --- Play Core (componentes diferidos de Flutter) ---------------------------
+# El motor de Flutter referencia Play Core aunque esta app no usa componentes
+# diferidos. Sin este dontwarn, R8 puede abortar por clases inexistentes.
+-dontwarn com.google.android.play.core.**
