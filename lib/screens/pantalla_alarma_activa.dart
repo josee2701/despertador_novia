@@ -36,11 +36,6 @@ class PantallaAlarmaActiva extends StatefulWidget {
 
 class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     with SingleTickerProviderStateMixin {
-  DateTime _ahora = DateTime.now();
-  Timer? _timer;
-  bool _mostrarBotones = false;
-  int _contadorBotones = 10;
-  Timer? _timerBotones;
   late AnimationController _pulseController;
 
   bool _desbloqueado = false;
@@ -55,19 +50,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _ahora = DateTime.now());
-    });
-
-    _timerBotones = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (_contadorBotones <= 1) {
-        t.cancel();
-        if (mounted) setState(() => _mostrarBotones = true);
-      } else {
-        if (mounted) setState(() => _contadorBotones--);
-      }
-    });
-
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -76,8 +58,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
   @override
   void dispose() {
-    _timer?.cancel();
-    _timerBotones?.cancel();
     _countdownTimer?.cancel();
     _pulseController.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -85,14 +65,26 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
     super.dispose();
   }
 
+  /// Cierra esta pantalla. Hoy la ruta siempre se abre con push, pero si
+  /// algún día fuera la raíz, `pop` dejaría la app en negro: en ese caso se
+  /// cierra la app.
+  void _cerrarPantallaAlarma() {
+    if (!mounted) return;
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      SystemNavigator.pop();
+    }
+  }
+
   void _detener() {
     widget.onDetener();
-    if (mounted) Navigator.of(context).pop();
+    _cerrarPantallaAlarma();
   }
 
   void _posponer() {
     widget.onPosponer();
-    if (mounted) Navigator.of(context).pop();
+    _cerrarPantallaAlarma();
   }
 
   void _onDireccionCambiada(String direccion) {
@@ -117,7 +109,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
           if (widget.onCerrarConConfirmacion != null &&
               !widget.alarma.confirmacionPendiente) {
             widget.onCerrarConConfirmacion!();
-            Navigator.of(context).pop(); // ← cerrar pantalla tras lanzar confirmación
+            _cerrarPantallaAlarma(); // ← cerrar pantalla tras lanzar confirmación
           } else {
             _detener(); // confirmación final o sin callback → detenida definitivamente
           }
@@ -143,11 +135,6 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
   @override
   Widget build(BuildContext context) {
-    final partes = partesHora12h(_ahora);
-    final horas = partes.hora.toString();
-    final minutos = partes.minuto.toString().padLeft(2, '0');
-    final periodo = partes.periodo;
-
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -224,31 +211,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
                       child: child,
                     );
                   },
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        '$horas:$minutos',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 88,
-                          fontWeight: FontWeight.w100,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        periodo,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w300,
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: const RelojAlarma(),
                 ),
 
                 const Spacer(flex: 1),
@@ -295,25 +258,7 @@ class _PantallaAlarmaActivaState extends State<PantallaAlarmaActiva>
 
                 const SizedBox(height: 24),
 
-                if (_mostrarBotones && !_desbloqueado)
-                  FadeIn(
-                    child: Center(
-                      child: OutlinedButton.icon(
-                        onPressed: _posponer,
-                        icon: const Icon(Icons.snooze),
-                        label: const Text('Posponer 5 min'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                          minimumSize: const Size(200, 56),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                if (!_desbloqueado) BotonPosponerRetardado(onPosponer: _posponer),
 
                 const SizedBox(height: 48),
               ],
@@ -428,5 +373,114 @@ class _FadeInState extends State<FadeIn> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return FadeTransition(opacity: _animation, child: widget.child);
+  }
+}
+
+/// Reloj de la pantalla de alarma. Tiene su propio timer para que el
+/// segundero solo reconstruya este widget y no el deslizador ni los botones.
+class RelojAlarma extends StatefulWidget {
+  const RelojAlarma({super.key});
+
+  @override
+  State<RelojAlarma> createState() => _RelojAlarmaState();
+}
+
+class _RelojAlarmaState extends State<RelojAlarma> {
+  DateTime _ahora = DateTime.now();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _ahora = DateTime.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final partes = partesHora12h(_ahora);
+    final horas = partes.hora.toString();
+    final minutos = partes.minuto.toString().padLeft(2, '0');
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(
+          '$horas:$minutos',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 88,
+            fontWeight: FontWeight.w100,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          partes.periodo,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 22,
+            fontWeight: FontWeight.w300,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Botón de emergencia "Posponer 5 min": aparece a los 10 s. Su timer vive
+/// aquí para que su aparición no reconstruya el resto de la pantalla.
+class BotonPosponerRetardado extends StatefulWidget {
+  final VoidCallback onPosponer;
+  const BotonPosponerRetardado({super.key, required this.onPosponer});
+
+  @override
+  State<BotonPosponerRetardado> createState() => _BotonPosponerRetardadoState();
+}
+
+class _BotonPosponerRetardadoState extends State<BotonPosponerRetardado> {
+  bool _visible = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(seconds: 10), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_visible) return const SizedBox.shrink();
+    return FadeIn(
+      child: Center(
+        child: OutlinedButton.icon(
+          onPressed: widget.onPosponer,
+          icon: const Icon(Icons.snooze),
+          label: const Text('Posponer 5 min'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+            minimumSize: const Size(200, 56),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          ),
+        ),
+      ),
+    );
   }
 }

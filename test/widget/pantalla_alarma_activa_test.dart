@@ -71,6 +71,28 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('el reloj y el botón de posponer tienen su propio ciclo',
+      (tester) async {
+    // El reloj usa DateTime.now(), que el reloj falso de los tests no avanza,
+    // así que no se puede comprobar el cambio de minuto. Sí se comprueba que
+    // el reloj sigue montado tras varios ticks y que "Posponer" aparece
+    // exactamente a los 10 s, sin que el resto de la pantalla dependa de ello.
+    await _montarEn(tester, const Size(360, 800));
+    _esperarSinDesbordeVertical(tester);
+    expect(find.byType(RelojAlarma), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 9));
+    expect(find.text('Posponer 5 min'), findsNothing);
+    expect(find.byType(RelojAlarma), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    _esperarSinDesbordeVertical(tester);
+    expect(find.text('Posponer 5 min'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('la zona de arrastre se encoge cuando la pantalla es baja',
       (tester) async {
     // Encogerla NO facilita el gesto —lo que hay que deslizar es una constante
